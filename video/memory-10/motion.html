@@ -1,0 +1,504 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Agent Memory Repos</title>
+<style>
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-500.woff2); font-weight: 500; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-600.woff2); font-weight: 600; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-700.woff2); font-weight: 700; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-800.woff2); font-weight: 800; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-900.woff2); font-weight: 900; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-800i.woff2); font-weight: 800; font-style: italic; }
+  @font-face { font-family: Hubot; src: url(../fonts/HubotSans-800.woff2); font-weight: 800; }
+  @font-face { font-family: Hubot; src: url(../fonts/HubotSans-900.woff2); font-weight: 900; }
+  @font-face { font-family: Neon; src: url(../fonts/MonaspaceNeon-400.woff2); font-weight: 400; }
+  @font-face { font-family: Neon; src: url(../fonts/MonaspaceNeon-600.woff2); font-weight: 600; }
+  @font-face { font-family: Neon; src: url(../fonts/MonaspaceNeon-700.woff2); font-weight: 700; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const layer = mk(), lctx = layer.getContext('2d');
+
+// ---------- palette (GitHub Primer, dark) ----------
+const C = {
+  bg: '#000000', canvas: '#0D1117', surface: '#161B22', btn: '#21262D', border: '#30363D', faint: '#484F58',
+  fg: '#F0F6FC', text: '#C9D1D9', muted: '#8B949E',
+  green: '#3FB950', green2: '#2EA043', greenBtn: '#238636', blue: '#58A6FF', purple: '#A371F7',
+  orange: '#F0883E', pink: '#DB61A2', yellow: '#E3B341', red: '#F85149',
+  g0: '#161B22', g1: '#0E4429', g2: '#006D32', g3: '#26A641', g4: '#39D353',
+};
+const GREENS = [C.g0, C.g1, C.g2, C.g3, C.g4];
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+
+// ---------- timing (music: 128 BPM, 8 bars = 15s) ----------
+const BEAT = 60 / 128, BAR = BEAT * 4, DUR = 15;
+const T_DROP = BAR, T_REPO = BAR * 2, T_OUT = BAR * 7, SLOT = BEAT * 2;
+const KICKS = [];
+for (let b = 1; b < 7; b++) for (let k = 0; k < 4; k++) KICKS.push(b * BAR + k * BEAT);
+KICKS.push(T_OUT, T_OUT + BEAT * 2);
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutCubic = p => 1 - Math.pow(1 - p, 3);
+const eInCubic = p => p * p * p;
+const eInOutCubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eOutBack = (p, s = 1.7) => p <= 0 ? 0 : 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(1010);
+function pulseAt(t, decay = 7) { let p = 0; for (const k of KICKS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * decay)); return p; }
+function font(f, c = ctx) { c.font = f; }
+function txt(s, x, y, color, align = 'left', base = 'alphabetic', c = ctx) { c.fillStyle = color; c.textAlign = align; c.textBaseline = base; c.fillText(s, x, y); }
+function fit(s, weight, fam, max, maxW) { ctx.font = `${weight} ${max}px ${fam}`; const w = ctx.measureText(s).width; return w > maxW ? Math.floor(max * maxW / w) : max; }
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+function wrap(s, maxW) {
+  const words = s.split(' '), lines = []; let cur = '';
+  for (const w of words) { const tt = cur ? cur + ' ' + w : w; if (ctx.measureText(tt).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tt; }
+  if (cur) lines.push(cur); return lines;
+}
+function rrect(x, y, w, h, r, c = ctx) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+// text rising out of a clip mask, per-character stagger (keeps kerning via prefix measuring)
+function riseChars(s, x, y, size, t0, t, color, stagger = .018, dur = .32, align = 'left') {
+  const w = ctx.measureText(s).width;
+  const x0 = align === 'left' ? x : align === 'center' ? x - w / 2 : x - w;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 30, y - size * 1.05, w + 60, size * 1.4); ctx.clip();
+  ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < s.length; i++) {
+    const p = eOutExpo(prog(t, t0 + i * stagger, t0 + i * stagger + dur));
+    if (p <= 0) continue;
+    const cx = x0 + ctx.measureText(s.slice(0, i)).width;
+    ctx.fillText(s[i], cx, y + (1 - p) * size * 1.1);
+  }
+  ctx.restore();
+}
+function maskRise(s, x, y, p, color, size, align = 'left') {
+  if (p <= 0) return;
+  const w = ctx.measureText(s).width;
+  const x0 = align === 'left' ? x : align === 'center' ? x - w / 2 : x - w;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 20, y - size * 1.05, w + 40, size * 1.4); ctx.clip();
+  txt(s, x, y + (1 - p) * size * 1.15, color, align); ctx.restore();
+}
+function hash7(s) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0').slice(0, 7); }
+
+// ---------- icons (drawn, Octicon-style) ----------
+function iconRepo(x, y, s, color) { // book
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 16, s / 16);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(3, 13); ctx.lineTo(3, 3); ctx.quadraticCurveTo(3, 1.5, 4.5, 1.5); ctx.lineTo(13, 1.5); ctx.lineTo(13, 11.5); ctx.lineTo(4.5, 11.5);
+  ctx.quadraticCurveTo(3, 11.5, 3, 13); ctx.quadraticCurveTo(3, 14.5, 4.5, 14.5); ctx.lineTo(6, 14.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(7, 13); ctx.lineTo(7, 16); ctx.lineTo(8.25, 15); ctx.lineTo(9.5, 16); ctx.lineTo(9.5, 13); ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  ctx.restore();
+}
+function starPath(cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .45 : r; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+  ctx.closePath();
+}
+function iconFork(x, y, s, color) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 16, s / 16); ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  for (const [a, b] of [[4, 3], [12, 3], [8, 13]]) { ctx.beginPath(); ctx.arc(a, b, 1.8, 0, 7); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(4, 5); ctx.lineTo(4, 6.5); ctx.quadraticCurveTo(4, 8, 6, 8); ctx.lineTo(10, 8); ctx.quadraticCurveTo(12, 8, 12, 6.5); ctx.lineTo(12, 5);
+  ctx.moveTo(8, 8); ctx.lineTo(8, 11); ctx.stroke(); ctx.restore();
+}
+function cursor(x, y, press = 0, a = 1) {
+  if (a <= 0) return;
+  ctx.save(); ctx.translate(x, y); const s = 1.5 * (1 - press * .18); ctx.scale(s, s); ctx.globalAlpha *= a;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 23); ctx.lineTo(6, 17.5); ctx.lineTo(10, 26); ctx.lineTo(13.5, 24.5); ctx.lineTo(9.5, 16.5); ctx.lineTo(17, 16.5); ctx.closePath();
+  ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+}
+
+const grains = []; for (let g = 0; g < 6; g++) { const c = mk(W / 2, H / 2), d = c.getContext('2d'), im = d.createImageData(W / 2, H / 2);
+  for (let i = 0; i < im.data.length; i += 4) { const v = rnd() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 13; } d.putImageData(im, 0, 0); grains.push(c); }
+// ---------- data ----------
+const ACC = [C.green, C.purple, C.blue, C.orange, C.pink, C.yellow, C.green, C.purple, C.blue, C.orange];
+const REPOS = [
+  ['Mem0', 'mem0ai', 'mem0', 'The memory layer for AI agents and assistants.', '', '65K+'],
+  ['Hindsight', 'vectorize-io', 'hindsight', 'Agent memory that learns from experience.', 'retain → recall → reflect'],
+  ['memU', 'NevaMind-AI', 'memU', 'An open-source memory framework for AI agents.', ''],
+  ['Cognee', 'topoteretes', 'cognee', 'Turns everything your agent sees into memory it can search.', 'documents + code + conversations → knowledge graph'],
+  ['Graphiti', 'getzep', 'graphiti', 'Real-time knowledge graphs for agents.', 'remembers how facts change over time'],
+  ['OpenViking', 'volcengine', 'OpenViking', 'An open-source context database for AI agents.', ''],
+  ['Letta', 'letta-ai', 'letta', 'Build stateful agents that keep learning.', 'memory + identity across sessions'],
+  ['Letta Code', 'letta-ai', 'letta-code', 'A coding agent that keeps its memory between sessions.', ''],
+  ['OpenMemory', 'mem0ai', 'openmemory', 'Private, local memory you can share across your AI tools.', ''],
+  ['Agent Memory Benchmark', 'vectorize-io', 'agent-memory-benchmark', 'Benchmark how well memory systems actually remember.', ''],
+].map(([name, owner, repo, desc, fact, stars], i) => ({ name, owner, repo, desc, fact, stars, acc: ACC[i] }));
+
+// ---------- pseudo-3D memory graph ----------
+const SPH = []; { const n = 150, ga = Math.PI * (3 - Math.sqrt(5)); for (let i = 0; i < n; i++) { const y = 1 - (i + .5) / n * 2, r = Math.sqrt(1 - y * y), a = i * ga; SPH.push([Math.cos(a) * r, y, Math.sin(a) * r]); } }
+const NB = SPH.map((p, i) => SPH.map((q, j) => [j, (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2]).filter(([j]) => j !== i).sort((a, b) => a[1] - b[1]).slice(0, 3).map(([j]) => j));
+const dot3 = (a, b) => clamp(a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1, 1);
+// sphere points that become repo memories: each ~1 rad from the last, never crowding earlier ones
+const ANCH = (() => { const out = [20]; while (out.length < 10) { const p = SPH[out[out.length - 1]]; let best = -1, bd = 1e9;
+  SPH.forEach((q, j) => { if (out.includes(j)) return; const crowd = out.some(k => Math.acos(dot3(SPH[k], q)) < .75) ? 5 : 0; const sc = Math.abs(Math.acos(dot3(p, q)) - 1) + crowd; if (sc < bd) { bd = sc; best = j; } });
+  out.push(best); } return out; })();
+function rot([x, y, z], yaw, pitch) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+  return [x1, y * cp - z1 * sp, y * sp + z1 * cp];
+}
+function proj(p, G) { const [x, y, z] = rot(p, G.yaw, G.pitch), f = 2.6 / (2.6 + z); return { x: G.cx + x * G.r * f, y: G.cy + y * G.r * f, z, f }; }
+function slerpPts(a, b, n, lift) { const w = Math.acos(dot3(a, b)), sw = Math.sin(w) || 1, out = []; for (let k = 0; k <= n; k++) { const u = k / n, ka = Math.sin((1 - u) * w) / sw, kb = Math.sin(u * w) / sw, h = 1 + lift * Math.sin(Math.PI * u); out.push([0, 1, 2].map(c => (ka * a[c] + kb * b[c]) * h)); } return out; }
+function memGraph(t, G, lit, active, activeT, labels) {
+  const pulse = pulseAt(t);
+  const P = SPH.map(p => proj(p, G));
+  // halo
+  const hg = ctx.createRadialGradient(G.cx, G.cy, G.r * .2, G.cx, G.cy, G.r * 1.5);
+  hg.addColorStop(0, rgba(C.purple, .16 + pulse * .06)); hg.addColorStop(.6, rgba(C.blue, .05)); hg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = hg; ctx.fillRect(G.cx - G.r * 1.6, G.cy - G.r * 1.6, G.r * 3.2, G.r * 3.2);
+  // mesh
+  ctx.lineWidth = 1;
+  SPH.forEach((_, i) => { for (const j of NB[i]) { if (j < i) continue; const a = P[i], b = P[j], d = (a.z + b.z) / 2; ctx.strokeStyle = rgba(C.blue, .05 + .14 * (1 - (d + 1) / 2) * G.a); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); } });
+  SPH.forEach((_, i) => { const p = P[i], d = 1 - (p.z + 1) / 2; ctx.fillStyle = rgba(C.text, (.12 + .5 * d) * G.a); ctx.beginPath(); ctx.arc(p.x, p.y, 1.2 + 1.8 * d * p.f, 0, 7); ctx.fill(); });
+  // links between stored memories (arcs above the surface)
+  for (let k = 1; k < lit; k++) {
+    const pts = slerpPts(SPH[ANCH[k - 1]], SPH[ANCH[k]], 24, .25);
+    const grow = k === active ? eOutCubic(prog(activeT, .2, .55)) : 1;
+    ctx.strokeStyle = rgba(REPOS[k].acc, .75); ctx.lineWidth = 2.2; ctx.beginPath();
+    pts.slice(0, Math.max(2, Math.round(25 * grow))).forEach((p, m) => { const q = proj(p, G); m ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }); ctx.stroke();
+    // a signal running along each link
+    const u = (t * .8 + k * .23) % 1, q = proj(pts[Math.floor(u * 24)], G);
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(q.x, q.y, 2.5, 0, 7); ctx.fill();
+  }
+  // memory nodes, back to front
+  const order = ANCH.map((a, k) => [k, P[a].z]).sort((a, b) => b[1] - a[1]);
+  for (const [k] of order) {
+    const p = P[ANCH[k]], r = REPOS[k], on = k < lit, isA = k === active;
+    const d = 1 - (p.z + 1) / 2;
+    if (!on) { ctx.strokeStyle = rgba(C.faint, .6 * G.a); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, 5 * p.f, 0, 7); ctx.stroke(); continue; }
+    const pop = isA ? eOutBack(prog(activeT, .38, .6), 3) : 1;
+    const rr = (isA ? 13 : 8) * p.f * pop;
+    ctx.save(); ctx.globalAlpha = .35 + .65 * d;
+    ctx.shadowColor = r.acc; ctx.shadowBlur = isA ? 40 : 16; ctx.fillStyle = r.acc; ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+    if (isA) { const ra = prog(activeT, .45, 1); ctx.strokeStyle = rgba(r.acc, 1 - ra); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, rr + ra * 60, 0, 7); ctx.stroke(); }
+    if (labels || isA) {
+      const fs = Math.round((isA ? 24 : labels ? 20 : 17) * p.f);
+      font(`${isA ? 800 : 700} ${fs}px Mona`);
+      const tw0 = ctx.measureText(r.name).width, right = p.x > G.cx && !(G.limit && p.x + 16 + tw0 > G.limit), lx = p.x + (right ? 16 : -16), al = right ? 'left' : 'right';
+      ctx.globalAlpha = (isA ? 1 : .45 + .55 * d) * (labels ? 1 : prog(activeT, .45, .65));
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; const tw = ctx.measureText(r.name).width; ctx.fillRect(al === 'left' ? lx - 6 : lx - tw - 6, p.y - fs * .75, tw + 12, fs * 1.2);
+      txt(r.name, lx, p.y + fs * .3, isA ? C.fg : C.text, al);
+    }
+    ctx.restore();
+  }
+  return P;
+}
+
+// ---------- text effects ----------
+const GLYPHS = '01<>/{}[]#$%&*+=?abcdef';
+function scramble(s, p, seed) { // characters resolve left to right out of noise
+  const r = mulberry(seed); let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const th = i / s.length * .7;
+    if (s[i] === ' ') out += ' '; else if (p >= th + .3) out += s[i]; else if (p >= th) out += GLYPHS[Math.floor(r() * GLYPHS.length)]; else out += '';
+  }
+  return out;
+}
+
+// ---------- background / overlays ----------
+function background(t, gx, gy, gr, acc, ga) {
+  ctx.fillStyle = '#000'; ctx.fillRect(-60, -60, W + 120, H + 120);
+  const pulse = pulseAt(t);
+  for (const [x, y, r, c, a] of [[gx, gy, gr * (1 + pulse * .07), acc, ga * (.8 + pulse * .4)],
+    [W * .82 + Math.sin(t * .7) * 120, H * .2 + Math.cos(t * .5) * 80, 640, C.purple, ga * .45],
+    [W * .12 + Math.cos(t * .6) * 100, H * .9, 560, C.blue, ga * .3]]) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rgba(c, a)); g.addColorStop(.5, rgba(c, a * .25)); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  // falling binary "memory dust"
+  font('400 16px Neon');
+  for (const m of dust) {
+    const y = ((m.y + t * m.v) % (H + 40)) - 20;
+    txt(m.c, m.x, y, rgba(C.green, m.a * (.5 + pulse * .5)), 'center');
+  }
+}
+const dust = Array.from({ length: 70 }, () => ({ x: rnd() * W, y: rnd() * H, v: 20 + rnd() * 60, a: .06 + rnd() * .12, c: rnd() < .5 ? '0' : '1' }));
+function overlays(t, frame) {
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .45, W / 2, H / 2, H * 1.1);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.62)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.07)'; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+function watermark() {
+  const s = 'x.com/nrqa__';
+  ctx.save();
+  font('600 24px Neon');
+  txt(s, 56, 62, 'rgba(240,246,252,0.42)', 'left', 'middle');
+  txt(s, W - 56, H - 54, 'rgba(240,246,252,0.42)', 'right', 'middle');
+  font('600 30px Neon');
+  txt(s, W / 2, H / 2, 'rgba(240,246,252,0.15)', 'center', 'middle');
+  ctx.restore();
+}
+function sliceGlitch(amount, seed) {
+  if (amount <= .02) return;
+  const r = mulberry(seed);
+  for (let k = 0; k < 8; k++) { const y = Math.floor(r() * H), h = Math.floor(10 + r() * 70), dx = (r() - .5) * 2 * 90 * amount; ctx.drawImage(cv, 0, y, W, h, dx, y, W, h); }
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .3 * amount; ctx.drawImage(cv, 10 * amount, 0); ctx.restore();
+}
+
+// ================= SCENE A: the agent that keeps forgetting =================
+const RESETS = [.62, 1.05, 1.30, 1.45, 1.58];
+function sceneIntro(t, frame) {
+  background(t, W / 2, 540, 760, C.red, .04 + .1 * prog(t, .4, 1.6));
+  let s = 0; for (const r of RESETS) if (t >= r) s++;
+  const s0 = s ? RESETS[s - 1] : 0, s1 = s < RESETS.length ? RESETS[s] : T_DROP, lt = t - s0, span = s1 - s0;
+  const sess = s === RESETS.length ? 847 : s + 1;
+  const col = eInExpo(prog(t, 1.68, T_DROP));
+  const WW = 1120, WH = 500, wx = W / 2 - WW / 2, wy = 540 - WH / 2 + 10;
+  ctx.save(); ctx.translate(W / 2, 540); ctx.scale(lerp(1, .02, col), lerp(1, .02, col)); ctx.translate(-W / 2, -540);
+  const intro = eOutExpo(prog(t, 0, .25));
+  ctx.globalAlpha = intro;
+  ctx.shadowColor = s ? C.red : C.blue; ctx.shadowBlur = 40 + (lt < .1 && s ? 60 : 0);
+  ctx.fillStyle = C.canvas; rrect(wx, wy, WW, WH, 16); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.strokeStyle = C.border; ctx.lineWidth = 2; ctx.stroke();
+  ctx.save(); rrect(wx, wy, WW, WH, 16); ctx.clip(); ctx.fillStyle = C.surface; ctx.fillRect(wx, wy, WW, 56); ctx.restore();
+  [C.red, C.yellow, C.green].forEach((c, k) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(wx + 30 + k * 26, wy + 28, 7, 0, 7); ctx.fill(); });
+  font('600 22px Neon'); txt(`agent — session #${sess}`, W / 2, wy + 29, C.muted, 'center', 'middle');
+  // chat
+  const speed = clamp(.55 / span, 1, 6);
+  const q = '> hey, remember what we built yesterday?', a = "I don't have any memory of previous sessions.";
+  font('600 32px Neon');
+  const tq = prog(lt * speed, .02, .3), ta = prog(lt * speed, .3, .5);
+  txt(typed(q, tq), wx + 50, wy + 140, C.fg);
+  if (ta > 0) { font('400 30px Neon'); txt(typed(a, ta), wx + 50, wy + 205, C.muted); }
+  if (ta >= 1) { font('700 28px Neon'); txt("Let's start from zero.", wx + 50, wy + 260, C.red); }
+  // memory meter
+  font('600 22px Neon'); txt('memory', wx + 50, wy + WH - 50, C.muted);
+  ctx.fillStyle = C.btn; rrect(wx + 160, wy + WH - 66, 560, 20, 10); ctx.fill();
+  const fake = s < RESETS.length ? .5 * eOutCubic(prog(lt * speed, 0, .5)) : 0;
+  const drain = lt < .12 && s ? 1 - lt / .12 : 0;
+  ctx.fillStyle = s ? C.red : C.blue; rrect(wx + 160, wy + WH - 66, 560 * Math.max(fake, drain * .5), 20, 10); ctx.fill();
+  txt(fake > 0 ? `${(fake * 2.4).toFixed(1)} KB · not persisted` : '0 B', wx + 740, wy + WH - 50, s ? C.red : C.muted);
+  ctx.restore();
+  // RESET stamp on each wipe
+  if (s && lt < .3) {
+    const p = prog(lt, 0, .3), sc = lerp(1.6, 1, eOutBack(clamp(p * 3), 2));
+    ctx.save(); ctx.translate(W / 2, 540); ctx.scale(sc, sc); ctx.rotate(-.08); ctx.globalAlpha = 1 - eInCubic(p);
+    font('900 150px Hubot'); ctx.strokeStyle = C.red; ctx.lineWidth = 6; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.strokeText('↺ RESET', 0, 0);
+    ctx.restore();
+  }
+  font('600 26px Neon'); ctx.globalAlpha = intro * (1 - col);
+  txt(`sessions started from zero: ${String(sess).padStart(3, '0')}`, W / 2, 940, s === RESETS.length ? C.red : C.muted, 'center');
+  ctx.globalAlpha = 1;
+  const g = prog(t, 1.76, T_DROP); if (g > 0) { ctx.fillStyle = rgba('#fff', g * .6); ctx.fillRect(0, 0, W, H); }
+}
+
+// ================= SCENE B: title =================
+function sceneTitle(t, frame) {
+  const lt = t - T_DROP, B = [0, BEAT, BEAT * 2, BEAT * 3];
+  background(t, W / 2, 600, 900, C.purple, .2);
+  const dis = prog(t, T_REPO - .32, T_REPO);  // characters fly apart on exit
+  const rr = mulberry(9);
+  function line(s, x, y, size, t0, color, st = .014, align = 'left') {
+    if (dis <= 0) return riseChars(s, x, y, size, t0, lt, color, st, .3, align);
+    const w = ctx.measureText(s).width, x0 = align === 'center' ? x - w / 2 : x;
+    ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    for (let i = 0; i < s.length; i++) {
+      const cx = x0 + ctx.measureText(s.slice(0, i)).width, e = eInCubic(dis), a = rr() * Math.PI * 2, d = 200 + rr() * 900;
+      ctx.save(); ctx.globalAlpha = 1 - e; ctx.translate(cx + Math.cos(a) * d * e, y + Math.sin(a) * d * e); ctx.rotate((rr() - .5) * 4 * e); ctx.fillText(s[i], 0, 0); ctx.restore();
+    }
+  }
+  // line 1
+  const s1 = fit('10 OPEN-SOURCE GITHUB PROJECTS', 900, 'Mona', 104, 1560); font(`900 ${s1}px Mona`);
+  const w10 = ctx.measureText('10 ').width, wl = ctx.measureText('OPEN-SOURCE GITHUB PROJECTS').width, x1 = W / 2 - (w10 + wl) / 2;
+  ctx.save(); ctx.shadowColor = C.green; ctx.shadowBlur = 36; line('10', x1, 300, s1, B[0], C.green); ctx.restore();
+  line('OPEN-SOURCE GITHUB PROJECTS', x1 + w10, 300, s1, B[0] + .06, C.fg);
+  font('italic 800 60px Mona'); line('that stop agents from', W / 2, 410, 60, B[1] - .1, C.muted, .01, 'center');
+  // STARTING FROM ZERO
+  const s3 = fit('STARTING FROM ZERO', 900, 'Hubot', 230, 1700); font(`900 ${s3}px Hubot`);
+  const wa = ctx.measureText('STARTING FROM ').width, wz = ctx.measureText('ZERO').width, x3 = W / 2 - (wa + wz) / 2, y3 = 640;
+  line('STARTING FROM ', x3, y3, s3, B[2] - .06, C.fg, .012);
+  const zj = lt > B[2] && lt < B[3] ? (mulberry(frame)() - .5) * 10 : 0;
+  ctx.save(); ctx.translate(zj, 0); line('ZERO', x3 + wa, y3, s3, B[2] + .1, C.red, .02); ctx.restore();
+  // beat 4: ZERO gets crossed out, "memory" stamped on top
+  const sp = eOutExpo(prog(lt, B[3], B[3] + .18));
+  if (sp > 0 && dis < 1) {
+    ctx.save(); ctx.globalAlpha = 1 - dis; ctx.strokeStyle = C.green; ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.shadowColor = C.green; ctx.shadowBlur = 30;
+    ctx.beginPath(); ctx.moveTo(x3 + wa - 10, y3 - s3 * .2); ctx.lineTo(x3 + wa - 10 + (wz + 20) * sp, y3 - s3 * .2 - 50 * sp); ctx.stroke(); ctx.restore();
+    const mp = eOutBack(prog(lt, B[3] + .1, B[3] + .35), 2.4);
+    if (mp > 0) {
+      ctx.save(); ctx.globalAlpha = 1 - dis; ctx.translate(x3 + wa + wz / 2, y3 - s3 * .95); ctx.scale(mp, mp); ctx.rotate(-.1);
+      font('800 50px Mona'); const mw = ctx.measureText('→ memory').width + 48;
+      ctx.fillStyle = C.greenBtn; ctx.shadowColor = C.green; ctx.shadowBlur = 40; rrect(-mw / 2, -36, mw, 72, 36); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = C.green; ctx.lineWidth = 3; ctx.stroke(); txt('→ memory', 0, 3, '#fff', 'center', 'middle'); ctx.restore();
+    }
+  }
+  // EVERY. NEW. SESSION.
+  font('700 34px Neon');
+  const ev = 'EVERY. NEW. SESSION.', ep = prog(lt, B[2] + .15, B[3]);
+  ctx.globalAlpha = 1 - dis;
+  txt(typed(ev, ep), W / 2 - ctx.measureText(ev).width / 2, 760, C.muted);
+  ctx.globalAlpha = 1;
+}
+
+// ================= SCENE C: writing 10 memories =================
+function graphState(t) {
+  const lt = t - T_REPO;
+  return { cx: 560, cy: 540, r: 330 * lerp(.4, 1, eOutExpo(prog(lt, 0, .5))), yaw: t * .55 + Math.sin(t * 2) * .05, pitch: -.32 + Math.sin(t * .7) * .08, a: eOutCubic(prog(lt, 0, .4)), limit: 965 };
+}
+function sceneRepos(t, frame) {
+  const cur = clamp(Math.floor((t - T_REPO) / SLOT), 0, 9), ts = T_REPO + cur * SLOT, lt = t - ts, r = REPOS[cur];
+  background(t, 560, 540, 700, r.acc, .14);
+  const G = graphState(t);
+  const P = memGraph(t, G, cur + 1, cur, lt, false);
+  const node = P[ANCH[cur]];
+  // HUD
+  ctx.globalAlpha = eOutCubic(prog(t, T_REPO, T_REPO + .3));
+  font('600 20px Neon'); const hud = `agent online  ·  session #848  ·  context restored`;
+  txt(hud, W - 64, 62, C.muted, 'right', 'middle');
+  ctx.fillStyle = C.green; ctx.beginPath(); ctx.arc(W - 82 - ctx.measureText(hud).width, 62, 6 + pulseAt(t) * 3, 0, 7); ctx.fill();
+  // long-term memory meter (bottom-left)
+  font('600 16px Neon'); txt('LONG-TERM MEMORY', 96, 952, C.muted);
+  for (let i = 0; i < 10; i++) { const on = i < cur || (i === cur && lt > .45); ctx.fillStyle = on ? REPOS[i].acc : C.btn; rrect(96 + i * 34, 966, 28, 14, 4); ctx.fill(); }
+  const mb = (cur + eOutCubic(prog(lt, .3, .6))) * .42;
+  font('700 22px Neon'); txt(`${mb.toFixed(2)} MB  ·  persisted ✓`, 96 + 10 * 34 + 14, 980, C.green);
+  ctx.globalAlpha = 1;
+
+  // --- card (right) ---
+  const X = 1040, CWd = 800;
+  const out = cur === 9 ? 0 : eInExpo(prog(lt, .82, .93));
+  ctx.save(); ctx.globalAlpha = 1 - out; ctx.translate(0, -out * 60);
+  const inA = k => eOutExpo(prog(lt, .02 + k * .04, .32 + k * .04));
+  // tag
+  ctx.save(); ctx.globalAlpha *= inA(0);
+  font('700 24px Neon'); const tag = `MEMORY ${String(cur + 1).padStart(2, '0')} / 10`; txt(tag, X, 200, r.acc, 'left', 'middle');
+  let bx = X + ctx.measureText(tag).width + 20;
+  const ok = lt > .45; font('700 18px Neon'); const wtxt = ok ? 'WRITE ✓' : 'WRITING…', ww = ctx.measureText(wtxt).width + 28;
+  ctx.fillStyle = ok ? rgba(C.green, .15) : rgba(C.muted, .1); ctx.strokeStyle = ok ? rgba(C.green, .7) : C.border; ctx.lineWidth = 1.5; rrect(bx, 184, ww, 32, 16); ctx.fill(); ctx.stroke();
+  txt(wtxt, bx + ww / 2, 201, ok ? C.green : C.muted, 'center', 'middle'); bx += ww + 12;
+  if (r.stars) { const p = eOutBack(prog(lt, .25, .5), 2.5); font('800 20px Mona'); const sw = ctx.measureText(`${r.stars} stars`).width + 58;
+    ctx.save(); ctx.translate(bx + sw / 2, 200); ctx.scale(p, p); ctx.fillStyle = rgba(C.yellow, .15); ctx.strokeStyle = rgba(C.yellow, .8); rrect(-sw / 2, -18, sw, 36, 18); ctx.fill(); ctx.stroke();
+    starPath(-sw / 2 + 22, 0, 10); ctx.fillStyle = C.yellow; ctx.fill(); txt(`${r.stars} stars`, -sw / 2 + 40, 1, C.yellow, 'left', 'middle'); ctx.restore(); }
+  ctx.restore();
+  // owner / repo
+  ctx.save(); ctx.globalAlpha *= inA(1);
+  iconRepo(X, 252, 30, C.muted); font('400 30px Neon'); const o = r.owner + ' / ', full = o + r.repo, fs = fit(full, 400, 'Neon', 30, CWd - 46);
+  font(`400 ${fs}px Neon`); const sh = typed(full, prog(lt, .03, .25)); txt(sh.slice(0, o.length), X + 46, 278, C.blue);
+  if (sh.length > o.length) { const ow = ctx.measureText(o).width; font(`700 ${fs}px Neon`); txt(sh.slice(o.length), X + 46 + ow, 278, C.blue); }
+  ctx.restore();
+  // name, decoded from noise
+  const nl = (() => { const one = fit(r.name, 900, 'Mona', 150, CWd); if (one >= 96) return { lines: [r.name], size: one }; const w = r.name.split(' '); const a = w.slice(0, -1).join(' '), b = w.slice(-1)[0]; return { lines: [a, b], size: Math.min(110, fit(a.length > b.length ? a : b, 900, 'Mona', 110, CWd)) }; })();
+  font(`900 ${nl.size}px Mona`);
+  let y = 300 + nl.size * .9;
+  const sp = prog(lt, .04, .42);
+  nl.lines.forEach((ln, k) => {
+    const s2 = scramble(ln, clamp(sp * 1.2 - k * .15), frame * 31 + k);
+    ctx.save(); ctx.shadowColor = rgba(r.acc, .6); ctx.shadowBlur = 40 * Math.exp(-lt * 3);
+    // resolved part in white, noise in accent
+    let x = X; for (let i = 0; i < s2.length; i++) { const real = s2[i] === ln[i]; txt(s2[i], x, y, real ? C.fg : r.acc); x += ctx.measureText(real ? ln[i] : s2[i]).width; }
+    ctx.restore(); y += nl.size * .98;
+  });
+  // description
+  font('500 34px Mona'); y += 46 - nl.size * .98 + 20;
+  for (const ln of wrap(r.desc, CWd)) { ctx.save(); ctx.globalAlpha *= inA(3); txt(ln, X, y + (1 - inA(3)) * 20, C.text); ctx.restore(); y += 46; }
+  // fact chip (from the post): segments around "→" light up in sequence
+  if (r.fact) {
+    y += 22; const segs = r.fact.split(' → ');
+    font('600 25px Neon');
+    const full2 = segs.join('  →  '), fw = ctx.measureText(full2).width, fs2 = fw > CWd - 60 ? Math.floor(25 * (CWd - 60) / fw) : 25;
+    font(`600 ${fs2}px Neon`);
+    const cw2 = ctx.measureText(full2).width + 50, ap = eOutExpo(prog(lt, .2, .45));
+    ctx.save(); ctx.globalAlpha *= ap;
+    ctx.fillStyle = rgba(C.green, .1); ctx.strokeStyle = rgba(C.green, .5); ctx.lineWidth = 1.5; rrect(X, y - 30, cw2 * ap, 56, 12); ctx.fill(); ctx.stroke();
+    let x = X + 25;
+    segs.forEach((sg, k) => {
+      const on = lt > .3 + k * .12, hot = on && lt < .3 + (k + 1) * .12 + .1;
+      txt(sg, x, y + 6, on ? (hot ? '#fff' : C.green) : C.faint); x += ctx.measureText(sg).width;
+      if (k < segs.length - 1) { txt('  →  ', x, y + 6, on ? C.green : C.faint); x += ctx.measureText('  →  ').width; }
+    });
+    ctx.restore(); y += 40;
+  }
+  // link
+  y += 40; font('400 24px Neon'); const link = `github.com/${r.owner}/${r.repo}`; const ls = fit(link, 400, 'Neon', 24, CWd); font(`400 ${ls}px Neon`);
+  ctx.save(); ctx.globalAlpha *= inA(4); txt(link, X, y, C.muted); ctx.fillStyle = r.acc; ctx.fillRect(X, y + 14, ctx.measureText(link).width * eOutExpo(prog(lt, .3, .6)), 2); ctx.restore();
+  ctx.restore();
+  // write stream: particles flow from the card into the graph node
+  const sx = X - 30, sy = 300 + nl.size * .6;
+  for (let k = 0; k < 16; k++) {
+    const d = k * .014, p = prog(lt, .14 + d, .42 + d); if (p <= 0 || p >= 1) continue;
+    const e = eInOutCubic(p), c1 = [lerp(sx, node.x, .5), sy - 160 + k * 12];
+    const x = (1 - e) * (1 - e) * sx + 2 * (1 - e) * e * c1[0] + e * e * node.x, yy = (1 - e) * (1 - e) * sy + 2 * (1 - e) * e * c1[1] + e * e * node.y;
+    ctx.fillStyle = k % 3 ? r.acc : '#fff'; ctx.shadowColor = r.acc; ctx.shadowBlur = 12; ctx.beginPath(); ctx.arc(x, yy, 3.5 * (1 - e * .4), 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+  }
+  // divider
+  ctx.fillStyle = rgba(C.fg, .08); ctx.fillRect(980, 170, 1.5, 760 * eOutExpo(prog(t, T_REPO, T_REPO + .5)));
+  // change flash
+  const fl = prog(lt, 0, .2);
+  if (fl < 1 && cur > 0) { ctx.fillStyle = rgba(r.acc, .12 * (1 - fl)); ctx.fillRect(980, 0, W - 980, H); }
+}
+
+// ================= SCENE D: welcome back =================
+function sceneOutro(t, frame) {
+  const lt = t - T_OUT;
+  background(t, W / 2, 560, 900, C.green, .18);
+  const z = eOutExpo(prog(lt, 0, .6));
+  const G = { cx: lerp(560, W / 2, z), cy: lerp(540, 585, z), r: lerp(330, 265, z), yaw: t * .55, pitch: -.32 + Math.sin(t * .7) * .08, a: 1 };
+  memGraph(t, G, 10, -1, 9, true);
+  // headline
+  font('900 84px Mona');
+  const parts = [['YOUR AGENT ', C.fg], ['REMEMBERS', C.green], [' NOW.', C.fg]];
+  const tw = parts.reduce((s, [p]) => s + ctx.measureText(p).width, 0); let hx = W / 2 - tw / 2;
+  parts.forEach(([p, c], i) => { riseChars(p, hx, 160, 84, .1 + i * .1, lt, c, .012, .3); hx += ctx.measureText(p).width; });
+  // the payoff: same terminal, new answer
+  const ap = eOutExpo(prog(lt, .55, .85));
+  if (ap > 0) {
+    const ww = 1000, wx = W / 2 - ww / 2, wy = 900;
+    ctx.save(); ctx.globalAlpha = ap; ctx.translate(0, (1 - ap) * 40);
+    ctx.fillStyle = 'rgba(13,17,23,0.92)'; ctx.strokeStyle = rgba(C.green, .6); ctx.lineWidth = 2; rrect(wx, wy, ww, 84, 14); ctx.fill(); ctx.stroke();
+    font('600 18px Neon'); txt('session #849', wx + 26, wy + 26, C.muted, 'left', 'middle');
+    font('600 30px Neon'); const msg = 'welcome back. picking up where we left off.', mp = prog(lt, .7, 1.3);
+    txt(typed(msg, mp), wx + 26, wy + 60, C.green, 'left', 'middle');
+    if (mp >= 1 && Math.floor(t * 5) % 2) { ctx.fillStyle = C.green; ctx.fillRect(wx + 30 + ctx.measureText(msg).width, wy + 46, 14, 28); }
+    ctx.restore();
+  }
+  font('500 24px Neon'); ctx.globalAlpha = eOutCubic(prog(lt, .35, .6));
+  txt('10 repos  ·  open source  ·  never start from zero again', W / 2, 220, C.muted, 'center'); ctx.globalAlpha = 1;
+  const f = lt >= 0 ? Math.exp(-lt * 10) : 0; if (f > .01) { ctx.fillStyle = rgba(C.green, .45 * f); ctx.fillRect(0, 0, W, H); }
+}
+
+// ================= master render =================
+window.render = function (t, frame = 0) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0;
+  let sx = 0, sy = 0;
+  for (const [it, amp] of [[T_DROP, 18], [T_OUT, 14], ...RESETS.map(r => [r, 10])]) if (t >= it) { const a = amp * Math.exp(-(t - it) * 9); sx += Math.sin(t * 91) * a; sy += Math.cos(t * 77) * a; }
+  const z = 1 + pulseAt(t, 9) * .008;
+  ctx.setTransform(z, 0, 0, z, W / 2 * (1 - z) + sx, H / 2 * (1 - z) + sy);
+  if (t < T_DROP) sceneIntro(t, frame);
+  else if (t < T_REPO) sceneTitle(t, frame);
+  else if (t < T_OUT) sceneRepos(t, frame);
+  else sceneOutro(t, frame);
+  if (t >= T_DROP && t < T_DROP + .35) { ctx.fillStyle = rgba(C.purple, .6 * Math.exp(-(t - T_DROP) * 12)); ctx.fillRect(-60, -60, W + 120, H + 120); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  let g = 0;
+  for (const k of [T_DROP, T_REPO, T_OUT, ...RESETS]) if (t >= k) g = Math.max(g, Math.exp(-(t - k) * 14));
+  if (t >= T_REPO + SLOT && t < T_OUT) g = Math.max(g, .5 * Math.exp(-((t - T_REPO) % SLOT) * 26));
+  sliceGlitch(g, frame * 13 + 1);
+  overlays(t, frame);
+  watermark();
+};
+window.ready = (async () => {
+  const fams = ['500 50px Mona', '600 50px Mona', '700 50px Mona', '800 50px Mona', '900 50px Mona', 'italic 800 50px Mona', '900 50px Hubot', '400 50px Neon', '600 50px Neon', '700 50px Neon'];
+  await Promise.all(fams.map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  return true;
+})();
+if (!navigator.webdriver) {
+  (async () => { await window.ready; const t0 = performance.now(); const loop = () => { const t = ((performance.now() - t0) / 1000) % DUR; render(t, Math.floor(t * 60)); requestAnimationFrame(loop); }; loop(); })();
+}
+</script>
+</body>
+</html>
