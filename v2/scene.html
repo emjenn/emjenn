@@ -1,0 +1,386 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>10 Free AI Courses</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// =====================================================================
+//  10 FREE AI courses from top tech companies — 15 s, 16:9
+//  Music: 128 BPM. beat = 0.46875 s, bar = 1.875 s
+//  0 ─ intro ─ 1.875 DROP ─ 10 companies × 2 beats ─ 11.25 OUTRO DROP ─ 14.0625 last hit ─ 15
+// =====================================================================
+const W = 1920, H = 1080;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const BEAT = 60 / 128, S16 = BEAT / 4, BAR = BEAT * 4;
+const DROP = BAR, SLOT = 2 * BEAT, OUTRO = 6 * BAR, END_HIT = 30 * BEAT;
+
+const CO = [
+  { name: 'Anthropic',       url: 'anthropic.skilljar.com',             logo: 'anthropic',      acc: ['#D97757'], tile: '#DA7758' },
+  { name: 'Google',          url: 'grow.google/ai',                     logo: 'google',         acc: ['#4285F4', '#EA4335', '#FBBC05', '#34A853'] },
+  { name: 'Meta',            url: 'ai.meta.com/learn',                  logo: 'meta',           acc: ['#0081FB'] },
+  { name: 'NVIDIA',          url: 'nvidia.com/en-us/training',          logo: 'nvidia',         acc: ['#76B900'] },
+  { name: 'Microsoft',       url: 'learn.microsoft.com/en-us/training', logo: 'microsoft',      acc: ['#F25022', '#7FBA00', '#00A4EF', '#FFB900'] },
+  { name: 'OpenAI',          url: 'academy.openai.com',                 logo: 'openai',         acc: ['#FFFFFF'] },
+  { name: 'IBM',             url: 'skillsbuild.org',                    logo: 'ibm',            acc: ['#1D63EA'] },
+  { name: 'AWS',             url: 'skillbuilder.aws',                   logo: 'aws',            acc: ['#FF9900'] },
+  { name: 'DeepLearning.AI', url: 'deeplearning.ai/courses',            logo: 'deeplearningai', acc: ['#FF4A61'] },
+  { name: 'Hugging Face',    url: 'huggingface.co/learn',               logo: 'huggingface',    acc: ['#FFD21E'] },
+];
+const IMG = {};
+window.ready = Promise.all(CO.map(c => new Promise((res, rej) => {
+  const im = new Image(); im.onload = () => { IMG[c.logo] = im; res(); }; im.onerror = rej; im.src = `logos/${c.logo}.png`;
+})));
+
+const F = {
+  disp: (w, s) => `${w} ${s}px "Inter Display", Inter, sans-serif`,
+  mono: (w, s) => `${w} ${s}px "DejaVu Sans Mono", monospace`,
+};
+const WHITE = '#FFFFFF', GRAY = '#8E8E93';
+
+// ---------- math ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const P = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, x) => a + (b - a) * x;
+const E = {
+  outExpo: x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x),
+  inExpo: x => x <= 0 ? 0 : Math.pow(2, 10 * x - 10),
+  outCubic: x => 1 - Math.pow(1 - x, 3),
+  inOutCubic: x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+  inOutExpo: x => x <= 0 ? 0 : x >= 1 ? 1 : x < .5 ? Math.pow(2, 20 * x - 10) / 2 : (2 - Math.pow(2, -20 * x + 10)) / 2,
+  outBack: x => { const c1 = 2.0, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+const hit = (t, at, d = 0.12) => t < at ? 0 : Math.exp(-(t - at) / d);
+const beatPulse = (t, a = DROP, b = 15) => t < a || t > b ? 0 : Math.exp(-((t - a) % BEAT) / 0.08);
+const pad2 = n => String(n).padStart(2, '0');
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; }
+function lum(hex) { const n = parseInt(hex.slice(1), 16); return (0.2126 * (n >> 16) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255; }
+
+// ---------- primitives ----------
+function rr(g, x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); }
+function txt(g, s, x, y, font, color, align = 'left', alpha = 1, sp = 0) {
+  g.save(); g.globalAlpha *= alpha; g.font = font; g.fillStyle = color; g.textAlign = align; g.letterSpacing = sp + 'px';
+  g.fillText(s, x, y); g.restore();
+}
+function fit(g, s, maxW, size, fn) { let z = size; g.font = fn(z); while (g.measureText(s).width > maxW && z > 8) { z -= 2; g.font = fn(z); } return z; }
+// per-character mask reveal (slides up from a clip line)
+function charsUp(g, s, x, y, font, color, t, start, stagger, size, sp = 0, align = 'left') {
+  g.save(); g.font = font; g.letterSpacing = sp + 'px';
+  const total = g.measureText(s).width;
+  let cx = align === 'center' ? x - total / 2 : x;
+  g.beginPath(); g.rect(cx - 30, y - size * 1.0, total + 60, size * 1.28); g.clip();
+  g.fillStyle = color; g.textAlign = 'left';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i], w = g.measureText(ch).width;
+    const p = E.outExpo(P(t, start + i * stagger, start + i * stagger + 0.32));
+    if (p > 0) g.fillText(ch, cx, y + (1 - p) * size * 1.1);
+    cx += w;
+  }
+  g.restore();
+  return total;
+}
+// a brand logo on its tile — logo keeps its native aspect ratio and colours
+function logoTile(g, c, cx, cy, size, opts = {}) {
+  const r = size * 0.16;
+  g.save();
+  if (opts.glow) { g.shadowColor = hexA(c.acc[0], 0.55 * opts.glow); g.shadowBlur = size * 0.35; }
+  rr(g, cx - size / 2, cy - size / 2, size, size, r); g.fillStyle = c.tile || '#FFFFFF'; g.fill();
+  g.restore();
+  const im = IMG[c.logo]; if (!im) return;
+  const box = size * (c.logo === 'anthropic' ? 0.70 : 0.74);
+  const s = Math.min(box / im.width, box / im.height);
+  g.drawImage(im, cx - im.width * s / 2, cy - im.height * s / 2, im.width * s, im.height * s);
+}
+function accentBar(g, c, x, y, w, h) {   // multi-colour brands get their colour segments
+  const n = c.acc.length;
+  for (let i = 0; i < n; i++) { g.fillStyle = c.acc[i]; g.fillRect(x + (w / n) * i, y, w / n + 0.5, h); }
+}
+
+// ---------- offscreen layer for the slice transitions ----------
+const layer = document.createElement('canvas'); layer.width = W; layer.height = H;
+const lg = layer.getContext('2d');
+function sliced(offFn, alpha = 1, bands = 6) {
+  const bh = H / bands;
+  ctx.save(); ctx.globalAlpha = alpha;
+  for (let i = 0; i < bands; i++) {
+    const dx = offFn(i);
+    ctx.drawImage(layer, 0, i * bh, W, bh, dx, i * bh, W, bh);
+  }
+  ctx.restore();
+}
+
+// ---------- background ----------
+const grain = [];
+(() => { let a = 77; const r = () => (a = (a * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let k = 0; k < 6; k++) { const g = document.createElement('canvas'); g.width = 480; g.height = 270; const x = g.getContext('2d');
+    const d = x.createImageData(480, 270); for (let i = 0; i < d.data.length; i += 4) { const v = r() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    x.putImageData(d, 0, 0); grain.push(g); } })();
+
+function currentCompany(t) { return t < DROP || t >= OUTRO ? -1 : Math.floor((t - DROP) / SLOT); }
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // fine horizontal scan lines that scroll — very low contrast
+  const k = currentCompany(t);
+  const col = k >= 0 ? CO[k].acc[0] : '#FFFFFF';
+  ctx.fillStyle = hexA(col, 0.035 + 0.03 * beatPulse(t));
+  const off = (t * 40) % 24;
+  for (let y = -24 + off; y < H; y += 24) ctx.fillRect(0, y, W, 1);
+}
+function finish(t, frame) {
+  const v = ctx.createRadialGradient(960, 540, 600, 960, 540, 1250);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = 0.02; ctx.globalCompositeOperation = 'screen'; ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(grain[frame % 6], 0, 0, W, H); ctx.restore();
+}
+
+// =====================================================================
+//  INTRO 0 → 1.875
+// =====================================================================
+const STROBE = ['#D97757', '#4285F4', '#0081FB', '#76B900', '#F25022', '#FFFFFF', '#1D63EA', '#FF9900', '#FF4A61', '#FFD21E'];
+function drawIntro(g, t) {
+  g.clearRect(0, 0, W, H);
+  // opening light line
+  const lp = P(t, 0, 0.22);
+  if (lp < 1) { const w = E.outExpo(lp) * W; g.fillStyle = hexA('#FFFFFF', 1 - lp); g.fillRect(960 - w / 2, 538, w, 4); }
+
+  // "10" — strobes through the 10 brand colours on 16th notes, then settles white
+  const move = E.inOutExpo(P(t, 0.82, 1.22));
+  const cx = lerp(960, 455, move), sc = lerp(1, 0.66, move);
+  const sIdx = Math.floor(t / S16) % 10;
+  const col = t < 0.82 ? STROBE[sIdx] : WHITE;
+  g.save(); g.translate(cx, 560); g.scale(sc, sc);
+  charsUp(g, '10', 0, 230, F.disp(900, 640), col, t, 0.05, 0.06, 640, -30, 'center');
+  g.restore();
+  // ring burst behind the number on the strobe
+  for (let i = 0; i < 2; i++) {
+    const rp = P(t, 0.05 + i * 0.12, 0.8 + i * 0.12); if (rp <= 0 || rp >= 1) continue;
+    g.strokeStyle = hexA(STROBE[(sIdx + i * 3) % 10], (1 - rp) * 0.8); g.lineWidth = 3;
+    g.beginPath(); g.arc(cx, 540, 120 + E.outExpo(rp) * 700, 0, Math.PI * 2); g.stroke();
+  }
+
+  // right-hand stack
+  const rx = 800;
+  charsUp(g, 'FREE AI', rx, 470, F.disp(900, 170), WHITE, t, 0.95, 0.025, 170, -4);
+  charsUp(g, 'COURSES', rx, 630, F.disp(900, 170), WHITE, t, 1.02, 0.025, 170, -4);
+  const bw = E.outExpo(P(t, 1.1, 1.45)) * 760;
+  for (let i = 0; i < 10; i++) { g.fillStyle = STROBE[i]; g.fillRect(rx + 6 + (bw / 10) * i, 668, bw / 10 + 0.5, 8); }
+  charsUp(g, 'FROM TOP TECH COMPANIES', rx + 6, 730, F.mono(700, 30), GRAY, t, 1.18, 0.012, 34, 6);
+
+  // row of 10 logo tiles popping on 16ths
+  const ts = 86, gap = 22, total = 10 * ts + 9 * gap, x0 = 960 - total / 2 + ts / 2;
+  for (let i = 0; i < 10; i++) {
+    const p = E.outBack(P(t, 0.5 + i * S16 * 0.9, 0.5 + i * S16 * 0.9 + 0.22));
+    if (p <= 0) continue;
+    g.save(); g.translate(x0 + i * (ts + gap), 905); g.scale(p, p);
+    logoTile(g, CO[i], 0, 0, ts); g.restore();
+  }
+}
+
+// =====================================================================
+//  COMPANY SLOT (2 beats each)
+// =====================================================================
+function drawCompany(g, k, lt) {
+  const c = CO[k], a0 = c.acc[0];
+  g.clearRect(0, 0, W, H);
+  const bump = 1 + 0.035 * hit(lt, BEAT, 0.09);
+  // giant index number (accent, ghosted)
+  g.save(); g.font = F.disp(900, 980); g.letterSpacing = '-40px';
+  g.fillStyle = hexA(a0, 0.09); g.textAlign = 'left';
+  g.fillText(pad2(k + 1), 40 - lt * 60, 1000); g.restore();
+  // glow
+  const tx = 500, ty = 540;
+  const gl = g.createRadialGradient(tx, ty, 0, tx, ty, 560);
+  gl.addColorStop(0, hexA(a0, 0.28)); gl.addColorStop(1, hexA(a0, 0));
+  g.fillStyle = gl; g.fillRect(0, 0, W, H);
+  // rotating frames
+  const fp = E.outExpo(P(lt, 0.02, 0.4));
+  for (let i = 0; i < 2; i++) {
+    const s = (470 + i * 110) * fp;
+    g.save(); g.translate(tx, ty); g.rotate((i ? -1 : 1) * (0.5 - fp * 0.5 + lt * 0.35));
+    g.strokeStyle = hexA(c.acc[(i + 1) % c.acc.length], 0.55 - i * 0.2); g.lineWidth = 2;
+    g.setLineDash([s * 0.5, s * 0.2]); g.lineDashOffset = -lt * 400;
+    rr(g, -s / 2, -s / 2, s, s, 40 + i * 10); g.stroke(); g.restore();
+  }
+  // logo tile slam
+  const tp = P(lt, 0, 0.3);
+  const ts = 380 * E.outBack(tp) * bump;
+  if (ts > 1) {
+    g.save(); g.translate(tx, ty); g.rotate((1 - E.outCubic(tp)) * -0.35);
+    logoTile(g, c, 0, 0, ts, { glow: 1 }); g.restore();
+  }
+
+  // ---- right column ----
+  const rx = 840, maxW = 1000;
+  // tag
+  const tagP = E.outExpo(P(lt, 0.04, 0.3));
+  g.save(); g.globalAlpha = tagP;
+  accentBar(g, c, rx, 318, 22, 22);
+  txt(g, `COURSE ${pad2(k + 1)} / 10`, rx + 40, 338, F.mono(700, 28), a0 === '#FFFFFF' ? WHITE : a0, 'left', 1, 6);
+  g.restore();
+  // name
+  const size = fit(g, c.name, maxW, 168, z => F.disp(900, z));
+  const nw = charsUp(g, c.name, rx - 6, 500, F.disp(900, size), WHITE, lt, 0.03, 0.018, size, -4);
+  // accent underline
+  accentBar(g, c, rx, 540, Math.min(nw, maxW) * E.outExpo(P(lt, 0.12, 0.42)), 10);
+  // url pill — typed on
+  const url = '↳ ' + c.url;
+  const us = fit(g, url, maxW - 70, 44, z => F.mono(700, z));
+  g.font = F.mono(700, us);
+  const full = g.measureText(url).width;
+  const typed = Math.round(url.length * E.outCubic(P(lt, 0.16, 0.46)));
+  if (typed > 0) {
+    const shown = url.slice(0, typed), sw = g.measureText(shown).width;
+    const pw = sw + 64 + (typed < url.length ? us * 0.6 : 0), ph = us + 46, py = 600;
+    const fill = a0, ink = lum(a0) > 0.5 ? '#000' : '#FFF';
+    rr(g, rx, py, pw, ph, ph / 2); g.fillStyle = fill; g.fill();
+    if (c.acc.length > 1) { // multi-colour brands: pill white with a colour rim
+      rr(g, rx, py, pw, ph, ph / 2); g.fillStyle = '#FFFFFF'; g.fill();
+      g.lineWidth = 5; g.save(); rr(g, rx, py, pw, ph, ph / 2); g.clip();
+      const grd = g.createLinearGradient(rx, 0, rx + full + 64, 0);
+      c.acc.forEach((a, i) => { grd.addColorStop(i / c.acc.length, a); grd.addColorStop((i + 1) / c.acc.length - 0.001, a); });
+      g.strokeStyle = grd; rr(g, rx, py, pw, ph, ph / 2); g.stroke(); g.restore();
+    }
+    const inkC = c.acc.length > 1 ? '#000' : ink;
+    txt(g, shown, rx + 32, py + ph / 2 + us * 0.36, F.mono(700, us), inkC);
+    if (typed < url.length || Math.floor(lt / 0.12) % 2 === 0) { g.fillStyle = inkC; g.fillRect(rx + 32 + sw + 4, py + 22, us * 0.5, ph - 44); }
+  }
+  // tiny meta line
+  txt(g, 'FREE AI COURSES  ·  OFFICIAL', rx + 4, 760, F.mono(500, 22), GRAY, 'left', E.outCubic(P(lt, 0.3, 0.5)), 5);
+}
+
+// =====================================================================
+//  HUD during the run: logo progress rail + label
+// =====================================================================
+function hud(t) {
+  const a = E.outCubic(P(t, DROP, DROP + 0.3)) * (1 - E.inExpo(P(t, OUTRO - 0.25, OUTRO)));
+  if (a <= 0) return;
+  const k = currentCompany(t);
+  ctx.save(); ctx.globalAlpha = a;
+  const ts = 44, gap = 14, x0 = 84, y = 1000;
+  for (let i = 0; i < 10; i++) {
+    const on = i <= k, cur = i === k;
+    const s = ts * (cur ? 1.25 + 0.12 * beatPulse(t) : 1);
+    ctx.save(); ctx.globalAlpha = a * (on ? 1 : 0.22);
+    logoTile(ctx, CO[i], x0 + i * (ts + gap) + ts / 2, y - (cur ? 6 : 0), s); ctx.restore();
+    if (cur) { accentBar(ctx, CO[i], x0 + i * (ts + gap), y + 36, ts, 4); }
+  }
+  txt(ctx, `${pad2(Math.max(k + 1, 1))} / 10`, x0 + 10 * (ts + gap) + 18, y + 10, F.mono(700, 26), WHITE, 'left', 1, 4);
+  txt(ctx, '10 FREE AI COURSES', W - 64, 64, F.mono(700, 22), WHITE, 'right', 0.85, 6);
+  ctx.restore();
+}
+
+// =====================================================================
+//  OUTRO 11.25 → 15 : all ten, readable grid
+// =====================================================================
+function outro(t) {
+  if (t < OUTRO - 0.02) return;
+  const lt = t - OUTRO;
+  charsUp(ctx, '10 FREE AI COURSES', 960, 168, F.disp(900, 100), WHITE, lt, 0.0, 0.02, 100, -2, 'center');
+  const sub = 'FROM TOP TECH COMPANIES';
+  txt(ctx, sub, 960, 222, F.mono(700, 24), GRAY, 'center', E.outCubic(P(lt, 0.25, 0.5)), 8);
+  const cw = 330, ch = 330, gap = 22, x0 = 960 - (5 * cw + 4 * gap) / 2, y0 = 262;
+  const chase = t > OUTRO + 1.0 && t < END_HIT ? Math.floor((t - OUTRO) / S16) % 10 : -1;
+  const endP = hit(t, END_HIT, 0.16);
+  for (let i = 0; i < 10; i++) {
+    const c = CO[i], a0 = c.acc[0];
+    const x = x0 + (i % 5) * (cw + gap), y = y0 + Math.floor(i / 5) * (ch + gap);
+    const d = 0.05 + i * S16 * 0.5;
+    const p = P(lt, d, d + 0.38); if (p <= 0) continue;
+    const sy = E.outBack(p), lit = i === chase ? 1 : 0;
+    ctx.save(); ctx.translate(x + cw / 2, y + ch / 2); ctx.scale(1 + endP * 0.04, sy * (1 + endP * 0.04)); ctx.translate(-cw / 2, -ch / 2);
+    ctx.globalAlpha = clamp(p * 2);
+    rr(ctx, 0, 0, cw, ch, 24); ctx.fillStyle = '#0B0B0C'; ctx.fill();
+    ctx.lineWidth = lit ? 3 : 1.5; ctx.strokeStyle = hexA(a0, lit ? 1 : 0.45 + 0.4 * endP); ctx.stroke();
+    if (lit) { ctx.save(); rr(ctx, 0, 0, cw, ch, 24); ctx.clip(); const gr = ctx.createRadialGradient(cw / 2, 110, 0, cw / 2, 110, 260); gr.addColorStop(0, hexA(a0, 0.28)); gr.addColorStop(1, hexA(a0, 0)); ctx.fillStyle = gr; ctx.fillRect(0, 0, cw, ch); ctx.restore(); }
+    txt(ctx, pad2(i + 1), 22, 42, F.mono(700, 22), a0 === '#FFFFFF' ? WHITE : a0);
+    logoTile(ctx, c, cw / 2, 118, 150, { glow: lit ? 1 : 0 });
+    const ns = fit(ctx, c.name, cw - 36, 36, z => F.disp(800, z));
+    txt(ctx, c.name, cw / 2, 245, F.disp(800, ns), WHITE, 'center', 1, -0.5);
+    accentBar(ctx, c, cw / 2 - 24, 262, 48, 4);
+    let us = fit(ctx, c.url, cw - 30, 19, z => F.mono(500, z));
+    if (us < 17) { // long URL: break after the domain
+      const cut = c.url.indexOf('/'), l1 = c.url.slice(0, cut), l2 = c.url.slice(cut);
+      us = Math.min(fit(ctx, l1, cw - 30, 19, z => F.mono(500, z)), fit(ctx, l2, cw - 30, 19, z => F.mono(500, z)));
+      txt(ctx, l1, cw / 2, 293, F.mono(500, us), '#D0D0D4', 'center');
+      txt(ctx, l2, cw / 2, 316, F.mono(500, us), '#D0D0D4', 'center');
+    } else txt(ctx, c.url, cw / 2, 300, F.mono(500, us), '#D0D0D4', 'center');
+    ctx.restore();
+  }
+  // CTA
+  const cp = E.outExpo(P(t, OUTRO + 1.0, OUTRO + 1.4));
+  if (cp > 0) {
+    const s = 'SAVE THIS  ·  ALL 10 ARE FREE';
+    ctx.font = F.mono(700, 26); ctx.letterSpacing = '6px';
+    const w = ctx.measureText(s).width + 70;
+    rr(ctx, 960 - w / 2 * cp, 984, w * cp, 58, 29); ctx.fillStyle = '#FFFFFF'; ctx.fill();
+    txt(ctx, s, 960, 1022, F.mono(700, 26), '#000', 'center', clamp((cp - 0.5) * 2), 6);
+  }
+  // last-hit ring
+  const rp = P(t, END_HIT, END_HIT + 0.8);
+  if (rp > 0 && rp < 1) { ctx.strokeStyle = hexA('#FFFFFF', (1 - rp) * 0.5); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(960, 600, 200 + E.outExpo(rp) * 900, 0, Math.PI * 2); ctx.stroke(); }
+}
+
+// =====================================================================
+//  WATERMARK — static, always on top
+// =====================================================================
+function watermark() {
+  ctx.save(); ctx.font = F.disp(600, 24); ctx.letterSpacing = '1px'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.40)';
+  ctx.textAlign = 'left'; ctx.fillText('x.com/nrqa__', 44, 52);
+  ctx.textAlign = 'right'; ctx.fillText('x.com/nrqa__', W - 44, H - 40);
+  ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.textAlign = 'center'; ctx.fillText('x.com/nrqa__', W / 2, H / 2);
+  ctx.restore();
+}
+
+// =====================================================================
+window.renderFrame = function (t, frame = 0) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  background(t);
+  // punch-zoom + shake on every cut
+  let punch = hit(t, DROP, 0.14) * 0.06 + hit(t, OUTRO, 0.14) * 0.05 + hit(t, END_HIT, 0.12) * 0.02;
+  for (let k = 1; k < 10; k++) punch += hit(t, DROP + k * SLOT, 0.1) * 0.025;
+  const sh = 16 * hit(t, DROP, 0.1) + 18 * hit(t, OUTRO, 0.1) + 6 * hit(t, END_HIT, 0.08);
+  ctx.save();
+  ctx.translate(960 + Math.sin(t * 91) * sh, 540 + Math.cos(t * 77) * sh); ctx.scale(1 + punch, 1 + punch); ctx.translate(-960, -540);
+
+  if (t < DROP) {
+    drawIntro(lg, t);
+    const ex = P(t, DROP - 0.2, DROP);
+    sliced(i => (i % 2 ? 1 : -1) * E.inExpo(ex) * 1400 * (1 + i * 0.08), 1 - E.inExpo(ex) * 0.4);
+  } else if (t < OUTRO) {
+    const k = currentCompany(t), lt = t - (DROP + k * SLOT);
+    drawCompany(lg, k, lt);
+    const inP = P(lt, 0, 0.16), outP = P(lt, SLOT - 0.13, SLOT);
+    sliced(i => (i % 2 ? -1 : 1) * ((1 - E.outExpo(inP)) * 900 + E.inExpo(outP) * 1300) * (1 + i * 0.06),
+      1 - E.inExpo(outP) * 0.5);
+  } else {
+    outro(t);
+  }
+  ctx.restore();
+
+  // colour streak at each company cut (next brand colour)
+  for (let k = 0; k <= 10; k++) {
+    const at = DROP + k * SLOT, p = P(t, at - 0.08, at + 0.1);
+    if (p <= 0 || p >= 1) continue;
+    const c = CO[Math.min(k, 9)], x = lerp(-300, W + 300, E.inOutCubic(p));
+    ctx.save(); ctx.globalAlpha = Math.sin(p * Math.PI) * 0.9;
+    c.acc.forEach((a, i) => { ctx.fillStyle = a; ctx.fillRect(x - 60 + i * (120 / c.acc.length) - 160 * i * 0, 0, 120 / c.acc.length, H); });
+    ctx.restore();
+  }
+  hud(t);
+  // drop flashes
+  for (const [at, s] of [[0, 0.35], [DROP, 0.55], [OUTRO, 0.55], [END_HIT, 0.25]]) {
+    const h = hit(t, at, 0.1); if (h < 0.01) continue;
+    ctx.fillStyle = `rgba(255,255,255,${h * s})`; ctx.fillRect(0, 0, W, H);
+  }
+  finish(t, frame);
+  watermark();
+};
+window.ready.then(() => renderFrame(0));
+</script>
+</body>
+</html>
