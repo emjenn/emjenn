@@ -1,0 +1,814 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Find Anyone Prompts</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDSemi;  src: url(../fonts/InterDisplay-SemiBold.otf); }
+  @font-face { font-family: IDMed;   src: url(../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const CREAM = '#F0EEE6', GREY = '#9A9893', DIM = '#55544F';
+const rgba = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+};
+// ---------- timing (music: 128 BPM) ----------
+const BEAT = 60 / 128, BAR = BEAT * 4, SLOT = BEAT * 2;
+const T_DROP = BAR, T_LIST = BAR * 2, T_OUT = BAR * 7, DUR = 15;
+const KICKS = [];
+for (let b = 1; b < 7; b++) for (let k = 0; k < 4; k++) KICKS.push(b * BAR + k * BEAT);
+KICKS.push(T_OUT, T_OUT + BEAT * 2);
+const slotStart = i => T_LIST + i * SLOT;
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutCubic = p => 1 - Math.pow(1 - p, 3);
+const eInOutCubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eOutBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+const eOutElastic = p => p <= 0 ? 0 : p >= 1 ? 1 : Math.pow(2, -10 * p) * Math.sin((p * 10 - .75) * (2 * Math.PI) / 3) + 1;
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(42);
+
+function pulseAt(t, decay = 7) {
+  let p = 0;
+  for (const k of KICKS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * decay));
+  return p;
+}
+function font(f) { ctx.font = f; }
+function txt(s, x, y, color, align = 'left', base = 'alphabetic') {
+  ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(s, x, y);
+}
+function maskRise(s, x, y, p, color, size, align = 'left', dist = 1.15) {
+  if (p <= 0) return;
+  const w = ctx.measureText(s).width;
+  const x0 = align === 'left' ? x : align === 'center' ? x - w / 2 : x - w;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0 - 30, y - size * 1.0, w + 60, size * 1.28); ctx.clip();
+  txt(s, x, y + (1 - p) * size * dist, color, align);
+  ctx.restore();
+}
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+const SCR = '!<>-_\\/[]{}=+*^?#01';
+function scramble(s, p, seed = 0) { // decode-style text reveal
+  const n = s.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const r = clamp(p * 1.6 - i / n * .6);
+    if (r >= 1 || s[i] === ' ' || s[i] === '.' || s[i] === '/') out.push(s[i]);
+    else if (r > 0) out.push(SCR[(i * 7 + seed + Math.floor(p * 40)) % SCR.length]);
+  }
+  return out.join('');
+}
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ---------- precomputed layers ----------
+const grains = [];
+for (let k = 0; k < 6; k++) {
+  const g = document.createElement('canvas'); g.width = 960; g.height = 540;
+  const gx = g.getContext('2d'); const im = gx.createImageData(960, 540); const r = mulberry(100 + k);
+  for (let i = 0; i < im.data.length; i += 4) { im.data[i] = im.data[i + 1] = im.data[i + 2] = 255; im.data[i + 3] = r() * 10; }
+  gx.putImageData(im, 0, 0); grains.push(g);
+}
+const dots = document.createElement('canvas'); dots.width = W; dots.height = H;
+{ const d = dots.getContext('2d'); d.fillStyle = CREAM;
+  for (let x = 24; x < W; x += 48) for (let y = 24; y < H; y += 48) { d.beginPath(); d.arc(x, y, 1.2, 0, 7); d.fill(); } }
+const particles = Array.from({ length: 140 }, () => ({ x: rnd() * W, y: rnd() * H, v: 30 + rnd() * 120, s: .6 + rnd() * 2.4, ph: rnd() * 7, a: .2 + rnd() * .6, c: Math.floor(rnd() * 10) }));
+
+// ---------- background ----------
+function background(t, gx, gy, gr, color, ga, tint = null) {
+  ctx.fillStyle = '#000'; ctx.fillRect(-60, -60, W + 120, H + 120);
+  const pulse = pulseAt(t);
+  const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr * (1 + pulse * .1));
+  g.addColorStop(0, rgba(color, ga * (0.7 + pulse * .5)));
+  g.addColorStop(.5, rgba(color, ga * .18));
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = 0.06 + pulse * 0.04; ctx.drawImage(dots, 0, 0); ctx.restore();
+  // travelling light band on the dot grid
+  const bandX = ((t * 520) % (W + 800)) - 400;
+  ctx.save(); ctx.beginPath(); ctx.rect(bandX - 140, 0, 280, H); ctx.clip();
+  ctx.globalAlpha = 0.13; ctx.drawImage(dots, 0, 0); ctx.restore();
+  // drifting particles (tinted to scene brand, or rainbow)
+  for (const e of particles) {
+    const x = ((e.x - t * e.v) % W + W) % W;
+    const y = e.y + Math.sin(t * 1.3 + e.ph) * 14;
+    ctx.fillStyle = rgba(tint || RAINBOW[e.c], e.a * (0.5 + 0.5 * Math.sin(t * 5 + e.ph)) * (0.5 + pulse * .6));
+    ctx.fillRect(x, y, e.s * 6, e.s * .9);
+  }
+}
+function overlays(t, frame) {
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .35, W / 2, H / 2, H * 1.05);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.72)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.09)';
+  for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+function watermark() {
+  const s = 'x.com/nrqa__';
+  ctx.save();
+  font('500 24px IDMed');
+  txt(s, 56, 62, 'rgba(242,240,234,0.40)', 'left', 'middle');
+  txt(s, W - 56, H - 50, 'rgba(242,240,234,0.40)', 'right', 'middle');
+  font('500 30px IDMed');
+  txt(s, W / 2, H / 2, 'rgba(242,240,234,0.16)', 'center', 'middle');
+  ctx.restore();
+}
+
+// ---------- Anthropic-style spark ----------
+const RAY_L = [1, .74, .93, .7, .98, .79, .9, .72, 1, .77, .87, .73];
+const RAY_J = RAY_L.map((_, i) => Math.sin(i * 12.9898) * 0.06);
+function spark(x, y, r, p, rot, color) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.fillStyle = color;
+  for (let i = 0; i < 12; i++) {
+    const pi = clamp((p - i * 0.035) / 0.55);
+    if (pi <= 0) continue;
+    const len = r * RAY_L[i] * eOutBack(pi, 1.4);
+    const a = i * Math.PI / 6 + RAY_J[i];
+    const w0 = r * 0.075, w1 = r * 0.04;
+    const ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+    ctx.beginPath();
+    ctx.moveTo(px * w0, py * w0);
+    ctx.lineTo(ca * len + px * w1, sa * len + py * w1);
+    ctx.arc(ca * len, sa * len, w1, a + Math.PI / 2, a - Math.PI / 2, true);
+    ctx.lineTo(-px * w0, -py * w0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.11 * clamp(p * 3), 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ================= palette =================
+// Claude (Anthropic) orange + cream, FullEnrich violet. FE/FE2 are the only values to swap for exact FullEnrich brand hex.
+const CO = '#D97757', CDEEP = '#C15F3C', FE = '#7B61FF', FE2 = '#A897FF';
+const RAINBOW = [CO, FE, FE2, CO, FE, CREAM, FE, CO, FE2, FE];
+
+// ================= data =================
+const PROMPTS = [
+  { title: 'Who is missing from my open deals?',
+    sub: 'Drop in your open deals. It finds the OTHER people you should be talking to.',
+    prompt: 'Here are my open deals: [paste company names + current contacts]. For each company, use FullEnrich to find the other decision-makers…' },
+  { title: 'Find 20 more like this customer.',
+    sub: 'Give it your best customer. You get 20 similar people, ranked.',
+    prompt: 'My best customer is [name, title, company, LinkedIn URL]. Analyze what makes them a great fit. Then use FullEnrich to find 20 similar people…' },
+  { title: 'Fill the gaps in this CRM file.',
+    sub: 'Upload an old contact list. It fills the missing details AND flags who changed jobs.',
+    prompt: 'Attached is my CRM export. Use FullEnrich to fill in every missing email, phone, and job title. Flag anyone who has changed jobs…' },
+  { title: 'Get contacts for this guest list.',
+    sub: 'Just a screenshot of an event guest list. You get email + phone for every person.',
+    prompt: "Here's a screenshot of an event guest list. Extract every name, title, and company you can read. Then use FullEnrich to find a work email…" },
+  { title: 'Find companies that use [tool].',
+    sub: 'Name a tool your buyers use. You get the companies ALREADY using it.',
+    prompt: 'Find companies that currently use [tool name], focused on [industry / region / company size]. For each company, use FullEnrich…' },
+  { title: 'Find 15 people for this job post.',
+    sub: 'Paste a job opening. You get 15 candidates, sorted by best fit.',
+    prompt: "Here's a job opening: [paste job post]. Pull out the must-have skills, seniority, and location. Then use FullEnrich to find 15 candidates…" },
+];
+
+// ================= timing =================
+const T_STATS = BAR * 5;
+const STAT_T = [0, 1, 2].map(j => T_STATS + j * BEAT * 2.75);
+const ALL_T = [...PROMPTS.map((_, i) => slotStart(i)), ...STAT_T];
+
+// ================= shared drawing =================
+function wrap(s, maxW, maxLines = 3) {
+  const words = s.split(' '); const lines = []; let cur = '';
+  for (const w of words) { const tt = cur ? cur + ' ' + w : w; if (ctx.measureText(tt).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tt; }
+  if (cur) lines.push(cur); return lines.slice(0, maxLines);
+}
+// FullEnrich-style mark: violet rounded tile with a contact glyph and a found-check
+function feMark(x, y, r, p, t, color = FE) {
+  if (p <= 0) return;
+  const s = eOutBack(clamp(p), 1.8);
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.rotate((1 - clamp(p)) * -.6);
+  ctx.fillStyle = color; roundRect(-r, -r, 2 * r, 2 * r, r * .42); ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.arc(-r * .08, -r * .2, r * .26, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(-r * .08, r * .62, r * .5, Math.PI, 0); ctx.fill();
+  // check badge
+  const ck = clamp(p * 2 - 1);
+  if (ck > 0) {
+    ctx.fillStyle = CO; ctx.beginPath(); ctx.arc(r * .55, r * .5, r * .3 * eOutBack(ck, 2.5), 0, 7); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = r * .09; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(r * .42, r * .5); ctx.lineTo(r * .52, r * .6); ctx.lineTo(r * .7, r * .4); ctx.stroke();
+  }
+  ctx.restore();
+}
+function check(x, y, r, p, fill = FE, stroke = '#000') {
+  if (p <= 0) return;
+  ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, r * eOutBack(clamp(p), 2.4), 0, 7); ctx.fill();
+  const k1 = clamp(p * 2), k2 = clamp(p * 2 - 1);
+  ctx.strokeStyle = stroke; ctx.lineWidth = r * .28; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(x - r * .42, y + r * .02);
+  ctx.lineTo(x - r * .42 + r * .3 * k1, y + r * .02 + r * .32 * k1);
+  if (k2 > 0) ctx.lineTo(x - r * .12 + r * .58 * k2, y + r * .34 - r * .66 * k2);
+  ctx.stroke();
+}
+function person(x, y, r, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y - r * .45, r * .42, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y + r * .75, r * .78, Math.PI, 0); ctx.fill();
+}
+function chip(x, y, label, color, p, size = 20, filled = true) {
+  if (p <= 0) return 0;
+  font(`600 ${size}px JBM`);
+  const w = ctx.measureText(label).width + size * 1.2, h = size * 1.7;
+  ctx.save(); ctx.globalAlpha *= clamp(p * 1.5); ctx.translate(x, y); ctx.scale(eOutBack(clamp(p), 2), eOutBack(clamp(p), 2));
+  ctx.fillStyle = filled ? color : rgba(color, .14); roundRect(0, -h / 2, w, h, h / 2); ctx.fill();
+  if (!filled) { ctx.strokeStyle = color; ctx.lineWidth = 1.5; roundRect(0, -h / 2, w, h, h / 2); ctx.stroke(); }
+  txt(label, size * .6, 1, filled ? '#000' : color, 'left', 'middle');
+  ctx.restore();
+  return w;
+}
+// "crowd" of people-dots used in intro & outro
+const CROWD = [];
+{ const r = mulberry(9); for (let gx = 0; gx < 32; gx++) for (let gy = 0; gy < 18; gy++) {
+  const x = 30 + gx * 60 + (r() - .5) * 26, y = 30 + gy * 60 + (r() - .5) * 26;
+  CROWD.push({ x, y, a: Math.atan2(y - H / 2, x - W / 2), d: Math.hypot(x - W / 2, y - H / 2), s: .7 + r() * .6, ph: r() });
+} }
+
+// ================= SCENE A: intro =================
+function sceneIntro(t) {
+  background(t, W / 2, H / 2, 700, FE, 0.06 + 0.14 * prog(t, 0, 1.7), FE);
+  const cx = W / 2, cy = H / 2 - 40;
+  const zoom = eInExpo(prog(t, 1.35, T_DROP));
+  // radar sweep over a crowd of people
+  const sweepA = t * (3.2 + zoom * 10) - Math.PI / 2;
+  const sp = eOutCubic(prog(t, 0, .5));
+  for (const c of CROWD) {
+    let da = ((sweepA - c.a) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const hit = Math.exp(-da * 2.2);
+    const found = t > .3 && c.ph < prog(t, .3, 1.6) && c.d < 300 + prog(t, 0, 1.5) * 900;
+    const a = sp * (c.d < 900 * sp + 120 ? 1 : 0);
+    if (a <= 0) continue;
+    const col = found ? FE : CREAM;
+    ctx.globalAlpha = a * (found ? .55 + hit * .45 : .12 + hit * .55);
+    const zx = lerp(c.x, cx + (c.x - cx) * 3, zoom), zy = lerp(c.y, cy + (c.y - cy) * 3, zoom);
+    person(zx, zy, 7 * c.s * (1 + hit * .4) * (1 + zoom * 2), col);
+  }
+  ctx.globalAlpha = 1;
+  // sweep wedge
+  ctx.save(); ctx.translate(cx, cy);
+  for (let k = 0; k < 24; k++) {
+    ctx.fillStyle = rgba(FE, .16 * (1 - k / 24) * sp);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 1300, sweepA - (k + 1) * .03, sweepA - k * .03); ctx.closePath(); ctx.fill();
+  }
+  ctx.strokeStyle = rgba(FE2, .8 * sp); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(sweepA) * 1300, Math.sin(sweepA) * 1300); ctx.stroke();
+  for (let k = 1; k <= 4; k++) { ctx.strokeStyle = rgba(CREAM, .07 * sp); ctx.beginPath(); ctx.arc(0, 0, k * 170, 0, 7); ctx.stroke(); }
+  ctx.restore();
+  // lockup: Claude spark + FullEnrich mark
+  const lx = cx - 190, rx = cx + 190;
+  ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.beginPath(); ctx.ellipse(cx, cy, 420, 170, 0, 0, 7); ctx.fill();
+  spark(lx, cy, 92 * (1 + zoom * 6), prog(t, .08, .7), t * 1.4, CO);
+  feMark(rx, cy, 78 * (1 + zoom * 6), prog(t, .25, .8), t);
+  const pl = eOutBack(prog(t, .45, .75), 2.4);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 2); ctx.scale(pl, pl);
+  ctx.fillStyle = CREAM; ctx.fillRect(-26, -5, 52, 10); ctx.fillRect(-5, -26, 10, 52); ctx.restore();
+  ctx.globalAlpha = 1 - zoom;
+  font('800 40px IDBold');
+  maskRise('Claude', lx, cy + 160, eOutExpo(prog(t, .45, .85)), CO, 40, 'center');
+  maskRise('FullEnrich', rx, cy + 160, eOutExpo(prog(t, .55, .95)), FE2, 40, 'center');
+  font('400 30px JBM');
+  const line = typed('> find anyone. email + phone. verified.', prog(t, .55, 1.4));
+  txt(line + (Math.floor(t * 4) % 2 ? '_' : ' '), cx, cy + 300, CREAM, 'center');
+  ctx.globalAlpha = 1;
+  if (zoom > 0) { ctx.fillStyle = rgba(FE, zoom * .9); ctx.fillRect(-60, -60, W + 120, H + 120); }
+}
+
+// ================= SCENE B: hero =================
+function sceneHero(t) {
+  const lt = t - T_DROP;
+  background(t, 1450, 520, 760, FE, 0.26, FE);
+  const out = i => eInExpo(prog(t, T_LIST - .45 + i * .04, T_LIST - .1 + i * .04));
+  const X = 130;
+  const L = [T_DROP, T_DROP + BEAT, T_DROP + BEAT * 2, T_DROP + BEAT * 3];
+  // "6 PROMPTS" — the 6 slams with echo rings
+  ctx.save(); ctx.translate(-out(0) * 1500, 0);
+  const sp = prog(t, L[0], L[0] + .3);
+  font('900 300px IDBlack');
+  const sc = lerp(2.2, 1, eOutBack(sp, 1.4));
+  ctx.save(); ctx.translate(X + 90, 330); ctx.scale(sc, sc);
+  for (const kk of KICKS) {
+    const age = (t - kk) / .5; if (kk < T_DROP + .2 || age < 0 || age > 1) continue;
+    ctx.save(); ctx.scale(1 + age * .3, 1 + age * .3); ctx.strokeStyle = rgba(CO, .5 * (1 - age)); ctx.lineWidth = 3;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.strokeText('6', 0, 10); ctx.restore();
+  }
+  txt('6', 0, 10, CO, 'center', 'middle');
+  ctx.restore();
+  font('900 150px IDBlack');
+  maskRise('PROMPTS', X + 230, 390, eOutExpo(prog(t, L[0] + .05, L[0] + .35)), CREAM, 150);
+  ctx.restore();
+  ctx.save(); ctx.translate(-out(1) * 1500, 0);
+  font('900 150px IDBlack');
+  maskRise('TO FIND', X, 570, eOutExpo(prog(t, L[1] - .03, L[1] + .3)), CREAM, 150);
+  ctx.restore();
+  // ANYONE in a violet block
+  ctx.save(); ctx.translate(-out(2) * 1500, 0);
+  font('900 150px IDBlack');
+  const aw = ctx.measureText('ANYONE').width;
+  const bp = eOutExpo(prog(t, L[2] - .03, L[2] + .3));
+  ctx.fillStyle = FE; ctx.fillRect(X - 20, 610, (aw + 44) * bp, 160);
+  ctx.fillStyle = CO; ctx.fillRect(X - 20, 770, (aw + 44) * bp, 10);
+  ctx.beginPath(); ctx.rect(X - 20, 610, (aw + 44) * bp, 160); ctx.clip();
+  txt('ANYONE', X + (1 - bp) * -90, 748, '#000');
+  ctx.restore();
+  // with Claude + FullEnrich
+  ctx.save(); ctx.translate(-out(3) * 1500, 0);
+  const wp = eOutExpo(prog(t, L[3] - .05, L[3] + .3));
+  font('italic 400 60px NR'); maskRise('with', X, 880, wp, GREY, 60);
+  spark(X + 165, 860, 26, prog(t, L[3], L[3] + .35), t * 2, CO);
+  font('800 52px IDBold'); maskRise('Claude', X + 205, 880, wp, CO, 52);
+  const cw = ctx.measureText('Claude ').width;
+  maskRise('+', X + 215 + cw, 880, wp, CREAM, 52);
+  feMark(X + 290 + cw, 862, 24, prog(t, L[3] + .05, L[3] + .4), t);
+  maskRise('FullEnrich', X + 330 + cw, 880, eOutExpo(prog(t, L[3], L[3] + .35)), FE2, 52);
+  ctx.restore();
+
+  // right: a contact card getting enriched field by field
+  const CX = 1180, CY = 250, CW = 600, CH = 560;
+  const cp = eOutExpo(prog(lt, .05, .5));
+  ctx.save(); ctx.translate(out(1) * 900 + (1 - cp) * 300, 0); ctx.globalAlpha = cp;
+  ctx.save(); ctx.translate(CX + CW / 2, CY + CH / 2); ctx.rotate(-.04 + Math.sin(t * 1.5) * .01); ctx.translate(-CX - CW / 2, -CY - CH / 2);
+  ctx.fillStyle = 'rgba(20,18,30,.92)'; roundRect(CX, CY, CW, CH, 28); ctx.fill();
+  ctx.strokeStyle = rgba(FE, .8); ctx.lineWidth = 2; roundRect(CX, CY, CW, CH, 28); ctx.stroke();
+  ctx.fillStyle = rgba(FE, .25); ctx.beginPath(); ctx.arc(CX + 90, CY + 100, 50, 0, 7); ctx.fill();
+  person(CX + 90, CY + 104, 34, FE2);
+  font('800 40px IDBold'); txt(scramble('Jordan Rivera', prog(lt, .1, .7), 3), CX + 165, CY + 95, CREAM);
+  font('400 22px JBM'); txt(scramble('VP Sales · Northwind', prog(lt, .2, .8), 7), CX + 166, CY + 135, GREY);
+  const rows = [['EMAIL', 'j.rivera@northwind.co'], ['PHONE', '+1 (415) 555-0142'], ['TITLE', 'VP Sales'], ['STATUS', 'verified']];
+  rows.forEach(([k, v], i) => {
+    const y = CY + 220 + i * 82, rp = prog(t, L[0] + .15 + i * BEAT * .9, L[0] + .45 + i * BEAT * .9);
+    ctx.fillStyle = rgba(CREAM, .06); roundRect(CX + 40, y - 30, CW - 80, 60, 14); ctx.fill();
+    ctx.fillStyle = rgba(FE, .35); roundRect(CX + 40, y - 30, (CW - 80) * eOutExpo(rp), 60, 14); ctx.fill();
+    font('600 18px JBM'); txt(k, CX + 62, y + 1, rp > 0 ? FE2 : DIM, 'left', 'middle');
+    font('600 24px JBM'); txt(rp > 0 ? scramble(v, rp * 1.4, i) : '— — —', CX + 170, y + 1, rp > 0 ? CREAM : DIM, 'left', 'middle');
+    check(CX + CW - 75, y, 17, prog(rp, .6, 1), i === 3 ? CO : FE);
+  });
+  ctx.restore(); ctx.restore();
+}
+
+// ================= transitions =================
+function slab(t, t0, dur, colors, dir = 1) {
+  const p = prog(t, t0, t0 + dur);
+  if (p <= 0 || p >= 1) return;
+  const e = eInOutCubic(p);
+  const skew = 300, totalW = W + 2 * skew + 600, n = colors.length;
+  for (let i = 0; i < n; i++) {
+    const lag = i * .06;
+    const ee = clamp((e - lag) / (1 - lag * (n - 1) / n));
+    const x = lerp(-totalW, W + skew, dir > 0 ? ee : 1 - ee);
+    const w = i === n - 1 ? W + 400 : 70 + i * 40;
+    ctx.fillStyle = colors[i];
+    ctx.beginPath(); ctx.moveTo(x + skew, 0); ctx.lineTo(x + skew + w, 0); ctx.lineTo(x + w, H); ctx.lineTo(x, H); ctx.closePath(); ctx.fill();
+  }
+}
+function barsWipe(t, t0, color, dir) {
+  const d = .22, p = prog(t, t0 - d / 2, t0 + d / 2);
+  if (p <= 0 || p >= 1) return;
+  const n = 9, bh = H / n;
+  for (let i = 0; i < n; i++) {
+    const q = clamp(p * 1.6 - (dir > 0 ? i : n - 1 - i) * .07);
+    const a = eInOutCubic(clamp(q * 2)), b = eInOutCubic(clamp(q * 2 - 1));
+    const x0 = dir > 0 ? b * W : (1 - a) * W, x1 = dir > 0 ? a * W : (1 - b) * W;
+    ctx.fillStyle = i % 3 === 1 ? CREAM : i % 3 === 2 ? CO : color;
+    ctx.fillRect(Math.min(x0, x1), i * bh, Math.abs(x1 - x0), bh + 1);
+  }
+}
+
+// ================= prompt visualisations (right panel) =================
+// cx,cy: centre; p: 0..1 build; lt: local secs; k: beat pulse
+const VIZ = [
+  // 0 — open deals: org chart, the one contact you know + 4 people you're missing
+  (cx, cy, p, lt, k) => {
+    const top = [cx, cy - 210];
+    ctx.fillStyle = rgba(CO, .2); ctx.beginPath(); ctx.arc(...top, 62, 0, 7); ctx.fill();
+    ctx.strokeStyle = CO; ctx.lineWidth = 3; ctx.stroke();
+    person(top[0], top[1] + 4, 30, CO);
+    chip(top[0] + 78, top[1] - 20, 'YOUR CONTACT', CO, prog(p, 0, .3), 16, false);
+    const roles = ['Budget owner', 'Champion', 'End user', 'Procurement'];
+    roles.forEach((r, i) => {
+      const x = cx + (i - 1.5) * 165, y = cy + 90 + (i % 2) * 40;
+      const lp = eOutExpo(prog(p, .1 + i * .1, .45 + i * .1));
+      ctx.strokeStyle = rgba(FE2, .7); ctx.lineWidth = 2.5; ctx.setLineDash([8, 7]); ctx.lineDashOffset = -lt * 60;
+      ctx.beginPath(); ctx.moveTo(top[0], top[1] + 62); ctx.lineTo(lerp(top[0], x, lp), lerp(top[1] + 62, y - 55, lp)); ctx.stroke(); ctx.setLineDash([]);
+      const np = prog(p, .35 + i * .1, .65 + i * .1);
+      if (np <= 0) return;
+      const s = eOutBack(np, 2) * (1 + (i === Math.floor(lt * 5) % 4 ? k * .1 : 0));
+      ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+      ctx.fillStyle = rgba(FE, .22); ctx.beginPath(); ctx.arc(0, 0, 55, 0, 7); ctx.fill();
+      ctx.strokeStyle = FE; ctx.lineWidth = 3; ctx.stroke();
+      person(0, 4, 26, FE2);
+      ctx.restore();
+      font('700 21px IDBold'); ctx.globalAlpha = clamp(np * 2); txt(r, x, y + 90, CREAM, 'center');
+      font('400 16px JBM'); txt('✉ ✓  ☎ ✓', x, y + 118, FE2, 'center'); ctx.globalAlpha = 1;
+      check(x + 40, y - 40, 15, prog(np, .5, 1), CO);
+    });
+  },
+  // 1 — lookalikes: best customer in the middle, 20 similar people ranked outward
+  (cx, cy, p, lt, k) => {
+    const r0 = mulberry(5);
+    const pts = Array.from({ length: 20 }, (_, i) => {
+      const a = i * 2.399 + .4, d = 95 + i * 12.5 + r0() * 10;
+      return [cx + Math.cos(a) * d * 1.15, cy + Math.sin(a) * d * .95, i];
+    });
+    pts.forEach(([x, y, i]) => {
+      const lp = eOutExpo(prog(p, .1 + i * .025, .4 + i * .025));
+      if (lp <= 0) return;
+      ctx.strokeStyle = rgba(FE, .45 * (1 - i / 26)); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(lerp(cx, x, lp), lerp(cy, y, lp)); ctx.stroke();
+      const sz = 22 - i * .6;
+      ctx.fillStyle = i < 3 ? FE : rgba(FE2, 1 - i / 30);
+      ctx.beginPath(); ctx.arc(lerp(cx, x, lp), lerp(cy, y, lp), sz * eOutBack(lp, 2), 0, 7); ctx.fill();
+      if (lp > .6) { font('700 15px JBM'); txt(String(i + 1), x, y + 1, '#000', 'center', 'middle'); }
+    });
+    for (let q = 0; q < 2; q++) { const age = (lt * 1.4 + q / 2) % 1; ctx.strokeStyle = rgba(CO, .5 * (1 - age)); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 60 + age * 300, 0, 7); ctx.stroke(); }
+    ctx.fillStyle = CO; ctx.beginPath(); ctx.arc(cx, cy, 58 * (1 + k * .08), 0, 7); ctx.fill();
+    person(cx, cy + 4, 28, '#000');
+    chip(cx - 110, cy - 330, 'BEST CUSTOMER → 20 LOOKALIKES', CO, prog(p, .2, .5), 18, false);
+    // ranked strip
+    font('600 18px JBM');
+    ctx.globalAlpha = prog(p, .55, .8);
+    ['#1  98% match', '#2  96% match', '#3  95% match'].forEach((s, i) => txt(s, cx + 250, cy + 210 + i * 30, i ? FE2 : CREAM, 'left'));
+    ctx.globalAlpha = 1;
+  },
+  // 2 — CRM gap fill: empty cells fill in, status tags land
+  (cx, cy, p, lt, k) => {
+    const X0 = cx - 330, Y0 = cy - 250, cw = [190, 120, 110, 150], rh = 82;
+    const heads = ['EMAIL', 'PHONE', 'TITLE', 'STATUS'];
+    font('600 17px JBM');
+    let x = X0; heads.forEach((h, j) => { txt(h, x + 12, Y0, GREY); x += cw[j] + 10; });
+    const status = [['UPDATED', FE], ['MOVED', CO], ['UPDATED', FE], ['NOT FOUND', DIM], ['UPDATED', FE]];
+    for (let r = 0; r < 5; r++) {
+      const y = Y0 + 30 + r * rh;
+      let x = X0;
+      for (let j = 0; j < 3; j++) {
+        const cpz = eOutExpo(prog(p, .12 + r * .07 + j * .04, .38 + r * .07 + j * .04)) * (r === 3 ? 0 : 1);
+        ctx.strokeStyle = rgba(CREAM, .25); ctx.lineWidth = 1.5; ctx.setLineDash([6, 6]);
+        roundRect(x, y, cw[j], rh - 16, 10); ctx.stroke(); ctx.setLineDash([]);
+        if (cpz > 0) { ctx.fillStyle = rgba(FE, .5); roundRect(x, y, cw[j] * cpz, rh - 16, 10); ctx.fill();
+          ctx.fillStyle = CREAM; for (let q = 0; q < 2; q++) ctx.fillRect(x + 14, y + 20 + q * 18, (cw[j] - 40 - q * 30) * cpz, 7); }
+        x += cw[j] + 10;
+      }
+      const [lab, col] = status[r];
+      chip(x, y + (rh - 16) / 2, lab, col, prog(p, .45 + r * .07, .7 + r * .07), 17, col !== DIM);
+    }
+    // moved: old co → new co callout
+    const mp = eOutExpo(prog(p, .65, .95));
+    if (mp > 0) {
+      const y = Y0 + 30 + rh + 33;
+      ctx.globalAlpha = mp;
+      ctx.fillStyle = 'rgba(15,13,12,.95)'; roundRect(cx - 160, cy + 220, 420, 70, 16); ctx.fill();
+      ctx.strokeStyle = CO; ctx.lineWidth = 2; roundRect(cx - 160, cy + 220, 420, 70, 16); ctx.stroke();
+      font('600 22px JBM'); txt('Acme', cx - 130, cy + 256, GREY, 'left', 'middle');
+      ctx.fillStyle = GREY; ctx.fillRect(cx - 132, cy + 256, 64 * mp, 2);
+      txt('→  Globex', cx - 50, cy + 256, CO, 'left', 'middle');
+      font('400 16px JBM'); txt('changed jobs', cx + 125, cy + 256, CREAM, 'left', 'middle');
+      ctx.strokeStyle = rgba(CO, .6); ctx.beginPath(); ctx.moveTo(cx + 260, y); ctx.lineTo(cx + 230, cy + 220); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  },
+  // 3 — guest list screenshot: scan line extracts names, contacts fly out
+  (cx, cy, p, lt, k) => {
+    const SX = cx - 340, SY = cy - 260, SW = 300, SH = 500;
+    ctx.save(); ctx.translate(SX + SW / 2, SY + SH / 2); ctx.rotate(-.05); ctx.translate(-SX - SW / 2, -SY - SH / 2);
+    ctx.fillStyle = '#ECEAE3'; roundRect(SX, SY, SW, SH, 14); ctx.fill();
+    ctx.fillStyle = '#2B2A27'; ctx.fillRect(SX, SY, SW, 46); font('700 18px IDBold'); txt('GUEST LIST', SX + 18, SY + 24, '#ECEAE3', 'left', 'middle');
+    for (let r = 0; r < 9; r++) { ctx.fillStyle = '#BDBAB2'; ctx.fillRect(SX + 20, SY + 76 + r * 46, 100 + (r * 37) % 80, 10); ctx.fillRect(SX + 20, SY + 92 + r * 46, 60 + (r * 23) % 60, 7); }
+    const sy = SY + SH * eInOutCubic(prog(p, .05, .75));
+    ctx.fillStyle = rgba(CO, .25); ctx.fillRect(SX, SY, SW, sy - SY);
+    ctx.fillStyle = CO; ctx.fillRect(SX - 10, sy - 2, SW + 20, 4);
+    ctx.restore();
+    // extracted rows
+    for (let r = 0; r < 6; r++) {
+      const rp = eOutExpo(prog(p, .15 + r * .1, .45 + r * .1));
+      if (rp <= 0) continue;
+      const y = SY + 40 + r * 80, x = lerp(SX + 60, cx + 10, rp);
+      ctx.globalAlpha = rp;
+      ctx.fillStyle = 'rgba(22,20,34,.95)'; roundRect(x, y, 330, 62, 14); ctx.fill();
+      ctx.strokeStyle = rgba(FE, .7); ctx.lineWidth = 1.5; roundRect(x, y, 330, 62, 14); ctx.stroke();
+      person(x + 34, y + 33, 14, FE2);
+      ctx.fillStyle = CREAM; ctx.fillRect(x + 62, y + 20, 110 + (r * 31) % 50, 8);
+      ctx.fillStyle = GREY; ctx.fillRect(x + 62, y + 36, 70, 6);
+      font('600 17px JBM'); txt('✉', x + 238, y + 33, FE2, 'center', 'middle'); txt('☎', x + 268, y + 33, FE2, 'center', 'middle');
+      check(x + 304, y + 31, 13, prog(rp, .6, 1), CO);
+      ctx.globalAlpha = 1;
+    }
+  },
+  // 4 — companies using [tool]: tiles light up, each reveals its tool owner
+  (cx, cy, p, lt, k) => {
+    chip(cx - 105, cy - 290, 'USES [TOOL] ✓', CO, prog(p, 0, .3), 22);
+    for (let i = 0; i < 9; i++) {
+      const c = i % 3, r = Math.floor(i / 3);
+      const x = cx - 300 + c * 205, y = cy - 220 + r * 160;
+      const tp = eOutBack(prog(p, .05 + i * .05, .35 + i * .05), 1.8);
+      if (tp <= 0) continue;
+      const lit = prog(p, .3 + i * .06, .5 + i * .06);
+      ctx.save(); ctx.translate(x + 92, y + 66); ctx.scale(tp, tp);
+      ctx.fillStyle = lit > 0 ? rgba(FE, .18 + .2 * Math.exp(-(lit) * 3)) : 'rgba(25,24,22,.9)';
+      roundRect(-92, -66, 184, 132, 18); ctx.fill();
+      ctx.strokeStyle = lit > 0 ? FE : rgba(CREAM, .2); ctx.lineWidth = 2; roundRect(-92, -66, 184, 132, 18); ctx.stroke();
+      // company glyph
+      ctx.fillStyle = lit > 0 ? CREAM : GREY; ctx.fillRect(-70, -44, 34, 34); ctx.fillRect(-26, -38, 70 - (i * 13) % 30, 9); ctx.fillRect(-26, -22, 40, 7);
+      if (lit > 0) {
+        person(-56, 30, 14, FE2);
+        font('600 15px JBM'); txt(['Head of Ops', 'RevOps Lead', 'Ops Manager'][i % 3], -36, 33, CREAM, 'left', 'middle');
+        check(66, -40, 13, lit, CO);
+      }
+      ctx.restore();
+    }
+  },
+  // 5 — job post: 15 candidates re-sort into a best-fit ranking
+  (cx, cy, p, lt, k) => {
+    // job card
+    const JX = cx - 340, JY = cy - 270;
+    ctx.fillStyle = 'rgba(25,23,21,.95)'; roundRect(JX, JY, 680, 120, 18); ctx.fill();
+    ctx.strokeStyle = rgba(CO, .8); ctx.lineWidth = 2; roundRect(JX, JY, 680, 120, 18); ctx.stroke();
+    chip(JX + 24, JY + 34, 'JOB POST', CO, prog(p, 0, .25), 16);
+    ['must-have skills', 'seniority', 'location'].forEach((s, i) => chip(JX + 24 + i * 210, JY + 84, s, FE2, prog(p, .1 + i * .07, .35 + i * .07), 16, false));
+    // 15 bars sorting
+    const fit = [62, 91, 45, 78, 97, 55, 70, 88, 40, 83, 67, 74, 94, 50, 59];
+    const order = fit.map((f, i) => i).sort((a, b) => fit[b] - fit[a]);
+    const sp = eInOutCubic(prog(p, .45, .85));
+    const BX = cx - 330, BY = cy + 260, bw = 36, gap = 8.6;
+    fit.forEach((f, i) => {
+      const gp = eOutExpo(prog(p, .12 + i * .015, .4 + i * .015));
+      const rank = order.indexOf(i);
+      const x = BX + lerp(i, rank, sp) * (bw + gap);
+      const h = 300 * f / 100 * gp;
+      ctx.fillStyle = rank < 3 && sp > .5 ? FE : rgba(FE2, .55 + .4 * f / 100);
+      roundRect(x, BY - h, bw, h, 6); ctx.fill();
+      if (rank < 3 && sp > .9) { font('700 15px JBM'); txt('#' + (rank + 1), x + bw / 2, BY - h - 14, CO, 'center'); }
+    });
+    ctx.fillStyle = rgba(CREAM, .25); ctx.fillRect(BX, BY + 6, 15 * (bw + gap), 2);
+    font('600 18px JBM'); ctx.globalAlpha = prog(p, .7, .9); txt('15 candidates · sorted by best fit', BX, BY + 40, CREAM); ctx.globalAlpha = 1;
+  },
+];
+
+// ================= SCENE C: prompts =================
+function railAndKicker(t, idx) {
+  // 9-step rail: 6 prompts + 3 proof points
+  const RX = 130, RW = W - 260, n = 9, seg = (RW - (n - 1) * 10) / n, RY = 1000;
+  for (let j = 0; j < n; j++) {
+    const t0 = ALL_T[j], t1 = j < 8 ? ALL_T[j + 1] : T_OUT;
+    const fill = eOutExpo(prog(t, t0, t1));
+    ctx.fillStyle = rgba(CREAM, .1); ctx.fillRect(RX + j * (seg + 10), RY, seg, 6);
+    ctx.fillStyle = j < 6 ? (j % 2 ? FE : CO) : FE2; ctx.fillRect(RX + j * (seg + 10), RY, seg * fill, 6);
+  }
+  font('600 18px JBM');
+  txt(idx < 6 ? 'PROMPTS' : 'WHY IT WORKS', RX + (idx < 6 ? 0 : 6 * (seg + 10)), RY - 16, idx < 6 ? CO : FE2);
+}
+function scenePrompt(t) {
+  const i = clamp(Math.floor((t - T_LIST) / SLOT), 0, 5);
+  const P = PROMPTS[i], lt = t - slotStart(i);
+  const acc = i % 2 ? FE : CO;
+  const VX = 1440, VY = 470;
+  background(t, VX, VY, 720, acc, .26, i % 2 ? FE : CO);
+  // giant outlined index
+  font('900 520px IDBlack');
+  ctx.save(); ctx.strokeStyle = rgba(acc, .2); ctx.lineWidth = 2.5; ctx.textAlign = 'left';
+  ctx.strokeText(String(i + 1).padStart(2, '0'), 60 + lt * 50, 1000); ctx.restore();
+
+  const k = lt >= BEAT ? Math.exp(-(lt - BEAT) * 8) : Math.exp(-lt * 8);
+  ctx.save(); VIZ[i](VX, VY, prog(lt, .02, .8), lt, k); ctx.restore();
+
+  const LX = 130;
+  font('600 24px JBM');
+  maskRise(`PROMPT ${String(i + 1).padStart(2, '0')} / 06`, LX, 190, eOutExpo(prog(lt, 0, .28)), acc, 24);
+  ctx.fillStyle = acc; ctx.fillRect(LX, 210, 420 * eOutExpo(prog(lt, .04, .35)), 3);
+  // title
+  font('900 80px IDBlack');
+  const tl = wrap(P.title, 900, 2);
+  tl.forEach((ln, j) => {
+    const p = eOutExpo(prog(lt, .03 + j * .06, .36 + j * .06));
+    const ab = (1 - p) * 16;
+    if (ab > .5) { ctx.globalCompositeOperation = 'lighter'; maskRise(ln, LX - ab, 310 + j * 88, p, rgba(acc, .6), 80); ctx.globalCompositeOperation = 'source-over'; }
+    maskRise(ln, LX, 310 + j * 88, p, CREAM, 80);
+  });
+  // ↳ subline
+  const sy = 310 + tl.length * 88 + 30;
+  font('500 32px IDMed');
+  const sl = wrap(P.sub, 840, 3);
+  const sp = eOutExpo(prog(lt, .14, .45));
+  txt('↳', LX, sy + 4, acc);
+  sl.forEach((ln, j) => maskRise(ln, LX + 46, sy + j * 44, eOutExpo(prog(lt, .14 + j * .05, .45 + j * .05)), j === 0 ? CREAM : rgba(CREAM, .85), 32));
+  // Claude prompt box with the real prompt typing in
+  const BY = 735, BW = 900, BH = 180;
+  const bp = eOutExpo(prog(lt, .08, .4));
+  if (bp > 0) {
+    ctx.save(); ctx.globalAlpha = bp; ctx.translate(0, (1 - bp) * 40);
+    ctx.fillStyle = 'rgba(28,26,24,.95)'; roundRect(LX, BY, BW, BH, 22); ctx.fill();
+    ctx.strokeStyle = rgba(CREAM, .18); ctx.lineWidth = 1.5; roundRect(LX, BY, BW, BH, 22); ctx.stroke();
+    spark(LX + 42, BY + 40, 17, 1, lt * 2, CO);
+    font('400 21px JBM');
+    const shown = typed(P.prompt, prog(lt, .12, .82));
+    const lines = wrap(P.prompt, BW - 170, 3);
+    let left = shown.length;
+    lines.forEach((ln, j) => {
+      const s = ln.slice(0, Math.max(0, left)); left -= ln.length + 1;
+      txt(s + (left < 0 && left > -ln.length - 2 && Math.floor(t * 6) % 2 ? '▍' : ''), LX + 80, BY + 47 + j * 32, CREAM);
+    });
+    // send button pulses on the beat
+    const sb = 1 + (lt > BEAT ? Math.exp(-(lt - BEAT) * 8) * .25 : 0);
+    ctx.fillStyle = CO; ctx.beginPath(); ctx.arc(LX + BW - 44, BY + BH - 40, 24 * sb, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(LX + BW - 44, BY + BH - 30); ctx.lineTo(LX + BW - 44, BY + BH - 50); ctx.moveTo(LX + BW - 53, BY + BH - 42); ctx.lineTo(LX + BW - 44, BY + BH - 51); ctx.lineTo(LX + BW - 35, BY + BH - 42); ctx.stroke();
+    font('600 15px JBM'); txt('Claude + FullEnrich', LX + 80, BY + BH - 18, rgba(FE2, .9));
+    ctx.restore();
+  }
+  railAndKicker(t, i);
+}
+
+// ================= SCENE D: proof points =================
+function sceneStat(t) {
+  const j = t < STAT_T[1] ? 0 : t < STAT_T[2] ? 1 : 2;
+  const lt = t - STAT_T[j];
+  background(t, W / 2, 520, 900, FE, .22, FE);
+  const LX = 130;
+  font('600 24px JBM');
+  const kick = ['EVERY PROMPT CHECKS 20+ DATA SOURCES', 'THE 1,000-PEOPLE TEST', 'YOU ONLY PAY WHEN IT FINDS SOMETHING'][j];
+  maskRise(`0${7 + j}  ·  ${kick}`, LX, 190, eOutExpo(prog(lt, 0, .25)), FE2, 24);
+  ctx.fillStyle = FE2; ctx.fillRect(LX, 210, 640 * eOutExpo(prog(lt, .04, .35)), 3);
+
+  if (j === 0) {
+    // 20 sources converge into one result
+    const cx = 1420, cy = 520;
+    for (let s = 0; s < 22; s++) {
+      const a = s / 22 * Math.PI * 2 + lt * .4, r = 330;
+      const sp = eOutBack(prog(lt, s * .015, .25 + s * .015), 2);
+      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r * .85;
+      ctx.strokeStyle = rgba(FE, .35); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(lerp(x, cx, eOutExpo(prog(lt, .1, .5))), lerp(y, cy, eOutExpo(prog(lt, .1, .5)))); ctx.stroke();
+      const q = (lt * 1.8 + s * .13) % 1;
+      if (lt > .3) { ctx.fillStyle = s % 3 ? FE2 : CO; ctx.beginPath(); ctx.arc(lerp(x, cx, q), lerp(y, cy, q), 4, 0, 7); ctx.fill(); }
+      ctx.fillStyle = 'rgba(22,20,34,.95)'; ctx.strokeStyle = FE; ctx.lineWidth = 2;
+      ctx.save(); ctx.translate(x, y); ctx.scale(sp, sp); roundRect(-22, -16, 44, 32, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = FE2; for (let l = 0; l < 3; l++) ctx.fillRect(-12, -9 + l * 7, 24 - l * 6, 3); ctx.restore();
+    }
+    feMark(cx, cy, 70, prog(lt, .2, .55), t);
+    font('900 230px IDBlack');
+    const n = Math.round(8 * eOutCubic(prog(lt, .05, .5)));
+    maskRise(`${n} in 10`, LX - 6, 470, eOutExpo(prog(lt, .03, .3)), FE, 230);
+    font('500 40px IDMed'); maskRise('people found — email + phone', LX, 545, eOutExpo(prog(lt, .12, .4)), CREAM, 40);
+    font('900 130px IDBlack');
+    maskRise('<1%', LX - 4, 760, eOutExpo(prog(lt, .35, .6)), CO, 130);
+    font('500 40px IDMed'); maskRise('of emails bounce', LX + 290, 745, eOutExpo(prog(lt, .4, .65)), CREAM, 40);
+  } else if (j === 1) {
+    // waffle of 1,000 people: 530 vs 910
+    const cols = 40, rows = 25, sz = 13, g = 4, WX = 1060, WY = 270;
+    const a = Math.round(530 * eOutCubic(prog(lt, .05, .45)));
+    const b = Math.round(910 * eOutCubic(prog(lt, .4, .85)));
+    for (let q = 0; q < 1000; q++) {
+      const c = Math.floor(q / rows), r = q % rows;
+      ctx.fillStyle = q < a ? GREY : q < b ? FE : rgba(CREAM, .08);
+      if (q >= a && q < b && q > b - 40) ctx.fillStyle = FE2;
+      ctx.fillRect(WX + c * (sz + g) * 1.0, WY + r * (sz + g), sz, sz);
+    }
+    font('600 18px JBM'); txt('1,000 people · same list', WX, WY - 22, GREY);
+    const bars = [['One data source', 530, GREY, a], ['FullEnrich', 910, FE, b]];
+    bars.forEach(([lab, v, col, cur], q) => {
+      const y = 330 + q * 170;
+      font('700 34px IDBold'); maskRise(lab, LX, y, eOutExpo(prog(lt, q * .3, q * .3 + .3)), q ? FE2 : CREAM, 34);
+      ctx.fillStyle = rgba(CREAM, .08); roundRect(LX, y + 24, 760, 50, 12); ctx.fill();
+      ctx.fillStyle = col; roundRect(LX, y + 24, Math.max(1, 760 * cur / 1000), 50, 12); ctx.fill();
+      font('900 44px IDBlack'); txt(String(cur), LX + 760 * cur / 1000 + 16, y + 64, q ? FE2 : CREAM);
+    });
+    const mp = prog(lt, .85, 1.05);
+    if (mp > 0) {
+      ctx.save(); ctx.translate(LX + 330, 760); ctx.rotate(-.06); const s = lerp(2.2, 1, eOutBack(mp, 1.6)); ctx.scale(s, s);
+      font('900 96px IDBlack'); const w = ctx.measureText('+380 MORE').width;
+      ctx.fillStyle = CO; ctx.fillRect(-w / 2 - 24, -78, w + 48, 104);
+      txt('+380 MORE', 0, 0, '#000', 'center'); ctx.restore();
+      font('500 30px IDMed'); ctx.globalAlpha = mp; txt('people found. same list.', LX, 880, CREAM); ctx.globalAlpha = 1;
+    }
+  } else {
+    // credits: 1 · 10 · 0
+    const items = [['EMAIL', '1', 'credit', FE], ['PHONE', '10', 'credits', CO], ['NOTHING FOUND', '0', 'charged', GREY]];
+    items.forEach(([lab, n, unit, col], q) => {
+      const x = 130 + q * 570, y = 300;
+      const pp = prog(lt, q * BEAT * .55, q * BEAT * .55 + .35);
+      if (pp <= 0) return;
+      const s = eOutBack(pp, 1.6);
+      ctx.save(); ctx.translate(x + 260, y + 260); ctx.scale(s, s); ctx.rotate((1 - clamp(pp)) * .3);
+      ctx.fillStyle = q === 2 ? 'rgba(25,24,22,.95)' : rgba(col, .14); roundRect(-260, -260, 520, 480, 34); ctx.fill();
+      ctx.strokeStyle = col; ctx.lineWidth = 3; roundRect(-260, -260, 520, 480, 34); ctx.stroke();
+      font('600 26px JBM'); txt(lab, -220, -200, col);
+      // coin
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 10, 120 * (1 + (q === Math.floor(lt * 4) % 3 ? .03 : 0)), 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 10, 100, 0, 7); ctx.stroke();
+      font('900 110px IDBlack'); txt(n, 0, 14, '#000', 'center', 'middle');
+      if (q === 2) { ctx.strokeStyle = CO; ctx.lineWidth = 10; ctx.lineCap = 'round'; const sp = eOutExpo(prog(pp, .4, 1)); ctx.beginPath(); ctx.moveTo(-110, 120); ctx.lineTo(-110 + 220 * sp, 120 - 220 * sp); ctx.stroke(); }
+      font('800 44px IDBold'); txt(`= ${n} ${unit}`, 0, 190, CREAM, 'center');
+      ctx.restore();
+    });
+    font('500 34px IDMed');
+    ctx.globalAlpha = eOutCubic(prog(lt, .7, 1));
+    txt('Nothing found = nothing charged.', W / 2, 900, CREAM, 'center');
+    ctx.globalAlpha = 1;
+  }
+  railAndKicker(t, 6 + j);
+}
+
+// ================= SCENE E: outro =================
+function sceneOutro(t) {
+  const lt = t - T_OUT;
+  background(t, W / 2, H / 2, 900, FE, .3, FE);
+  // the whole crowd, found — radiating from centre
+  for (const c of CROWD) {
+    const d = c.d / 1100, fp = prog(lt, d * .5, d * .5 + .2);
+    if (fp <= 0) continue;
+    ctx.globalAlpha = .18 + .25 * Math.exp(-((lt * 1.2 - d) % 1 + 1) % 1 * 4);
+    person(c.x, c.y, 7 * c.s * eOutBack(fp, 2), c.ph < .12 ? CO : FE);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.beginPath(); ctx.ellipse(W / 2, 520, 820, 330, 0, 0, 7); ctx.fill();
+  const fl = Math.exp(-lt * 9);
+  if (fl > .01) { ctx.fillStyle = rgba(FE2, .6 * fl); ctx.fillRect(0, 0, W, H); }
+
+  // lockup
+  const cy = 330;
+  spark(W / 2 - 120, cy, 62, prog(lt, .05, .5), lt * 1.5, CO);
+  const pl = eOutBack(prog(lt, .15, .4), 2.4);
+  ctx.save(); ctx.translate(W / 2, cy); ctx.scale(pl, pl); ctx.fillStyle = CREAM; ctx.fillRect(-20, -4, 40, 8); ctx.fillRect(-4, -20, 8, 40); ctx.restore();
+  feMark(W / 2 + 120, cy, 54, prog(lt, .12, .5), t);
+  // headline
+  font('900 150px IDBlack');
+  const h1 = 'Find ', h2 = 'anyone.';
+  const w1 = ctx.measureText(h1).width, w2 = ctx.measureText(h2).width;
+  const hx = W / 2 - (w1 + w2) / 2, hy = 600;
+  maskRise(h1, hx, hy, eOutExpo(prog(lt, .2, .55)), CREAM, 150);
+  const g = ctx.createLinearGradient(hx + w1, 0, hx + w1 + w2, 0);
+  const sh = (lt * .6) % 1;
+  g.addColorStop(0, FE); g.addColorStop(clamp(sh), FE2); g.addColorStop(1, CO);
+  maskRise(h2, hx + w1, hy, eOutExpo(prog(lt, .3, .65)), g, 150);
+  ctx.fillStyle = CO; ctx.fillRect(hx + w1, hy + 24, w2 * eOutExpo(prog(lt, .5, .9)), 8);
+  font('600 34px JBM');
+  ctx.globalAlpha = eOutCubic(prog(lt, .55, .85));
+  txt('Claude + FullEnrich', W / 2, 700, CREAM, 'center');
+  font('500 28px IDMed');
+  txt('verified email + phone  ·  20+ data sources  ·  pay only when found', W / 2, 760, GREY, 'center');
+  ctx.globalAlpha = 1;
+  chip(W / 2 - 150, 850, 'SAVE THESE PROMPTS ↗', FE, prog(lt, .8, 1.1), 24);
+}
+
+// ================= master render =================
+window.render = function (t, frame = 0) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  let sx = 0, sy = 0;
+  for (const it of [T_DROP, T_OUT]) if (t >= it) { const a = 18 * Math.exp(-(t - it) * 7); sx += Math.sin(t * 91) * a; sy += Math.cos(t * 77) * a; }
+  for (const it of ALL_T) if (t >= it) { const a = 6 * Math.exp(-(t - it) * 12); sx += Math.sin(t * 113) * a; sy += Math.cos(t * 97) * a; }
+  const z = 1 + pulseAt(t, 9) * .01;
+  ctx.setTransform(z, 0, 0, z, W / 2 * (1 - z) + sx, H / 2 * (1 - z) + sy);
+
+  if (t < T_DROP) sceneIntro(t);
+  else if (t < T_LIST) sceneHero(t);
+  else if (t < T_STATS) scenePrompt(t);
+  else if (t < T_OUT) sceneStat(t);
+  else sceneOutro(t);
+
+  if (t >= T_DROP && t < T_DROP + .3) { ctx.fillStyle = `rgba(255,255,255,${.7 * Math.exp(-(t - T_DROP) * 14)})`; ctx.fillRect(-60, -60, W + 120, H + 120); }
+  slab(t, T_LIST - .38, .7, [FE2, CREAM, CO, FE, CO]);
+  for (let i = 1; i < 6; i++) barsWipe(t, slotStart(i), i % 2 ? FE : CO, i % 2 ? 1 : -1);
+  slab(t, T_STATS - .3, .6, [CO, CREAM, FE2, FE], -1);
+  for (let j = 1; j < 3; j++) barsWipe(t, STAT_T[j], FE, j % 2 ? 1 : -1);
+  slab(t, T_OUT - .32, .6, [CO, FE2, CREAM, FE]);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  overlays(t, frame);
+  watermark();
+};
+
+window.ready = (async () => {
+  const fams = ['900 50px IDBlack', '800 50px IDBold', '500 50px IDMed', 'italic 400 50px NR', '400 50px JBM', '600 50px JBM'];
+  await Promise.all(fams.map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  return true;
+})();
+if (!navigator.webdriver) {
+  (async () => { await window.ready; const t0 = performance.now(); const loop = () => { const t = ((performance.now() - t0) / 1000) % DUR; render(t, Math.floor(t * 60)); requestAnimationFrame(loop); }; loop(); })();
+}
+</script>
+</body>
+</html>
+
