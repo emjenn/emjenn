@@ -159,8 +159,8 @@ function spark(x, y, r, p, rot, color) {
 }
 
 // ================= palette =================
-// Claude (Anthropic) orange + cream, FullEnrich violet. FE/FE2 are the only values to swap for exact FullEnrich brand hex.
-const CO = '#D97757', CDEEP = '#C15F3C', FE = '#7B61FF', FE2 = '#A897FF';
+// Claude (Anthropic) orange + cream; FullEnrich is monochrome white-on-black (from its logo).
+const CO = '#D97757', CDEEP = '#C15F3C', FE = '#FFFFFF', FE2 = '#CFCFCF';
 const RAINBOW = [CO, FE, FE2, CO, FE, CREAM, FE, CO, FE2, FE];
 
 // ================= data =================
@@ -196,21 +196,44 @@ function wrap(s, maxW, maxLines = 3) {
   for (const w of words) { const tt = cur ? cur + ' ' + w : w; if (ctx.measureText(tt).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tt; }
   if (cur) lines.push(cur); return lines.slice(0, maxLines);
 }
-// FullEnrich-style mark: violet rounded tile with a contact glyph and a found-check
+// FullEnrich logo: ring, four-point star, two waves. Geometry measured from the brand mark,
+// in units of the ring's centre-line radius r. p: build-in 0..1, t: drives star twinkle + wave flow.
+function waveY(u, mid, amp, crest) { return mid - amp * Math.cos(2 * Math.PI * (u - crest) / 1.04); }
 function feMark(x, y, r, p, t, color = FE) {
   if (p <= 0) return;
-  const s = eOutBack(clamp(p), 1.8);
-  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.rotate((1 - clamp(p)) * -.6);
-  ctx.fillStyle = color; roundRect(-r, -r, 2 * r, 2 * r, r * .42); ctx.fill();
-  ctx.fillStyle = '#000';
-  ctx.beginPath(); ctx.arc(-r * .08, -r * .2, r * .26, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(-r * .08, r * .62, r * .5, Math.PI, 0); ctx.fill();
-  // check badge
-  const ck = clamp(p * 2 - 1);
-  if (ck > 0) {
-    ctx.fillStyle = CO; ctx.beginPath(); ctx.arc(r * .55, r * .5, r * .3 * eOutBack(ck, 2.5), 0, 7); ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.lineWidth = r * .09; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath(); ctx.moveTo(r * .42, r * .5); ctx.lineTo(r * .52, r * .6); ctx.lineTo(r * .7, r * .4); ctx.stroke();
+  const s = eOutBack(clamp(p * 1.4), 1.6);
+  ctx.save(); ctx.translate(x, y); ctx.scale(s * r, s * r);
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // ring draws on clockwise from the top
+  const rp = eOutExpo(clamp(p * 1.5));
+  ctx.lineWidth = .155;
+  ctx.beginPath(); ctx.arc(0, 0, 1, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rp); ctx.stroke();
+  // star: concave four-point, pops then twinkles
+  const sp = eOutBack(clamp(p * 1.8 - .45), 2.6) * (1 + .08 * Math.sin(t * 7));
+  if (sp > 0) {
+    ctx.save(); ctx.translate(.02, -.4); ctx.scale(sp * .33, sp * .33); ctx.rotate(Math.sin(t * 2) * .08);
+    ctx.beginPath(); ctx.moveTo(0, -1);
+    for (let q = 0; q < 4; q++) {
+      const a1 = -Math.PI / 2 + q * Math.PI / 2, a2 = a1 + Math.PI / 2;
+      ctx.quadraticCurveTo(Math.cos(a1 + Math.PI / 4) * .14, Math.sin(a1 + Math.PI / 4) * .14, Math.cos(a2), Math.sin(a2));
+    }
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+  // waves: drawn left→right, clipped to the ring, flowing sideways
+  const wp = eInOutCubic(clamp(p * 1.6 - .3));
+  if (wp > 0) {
+    ctx.save(); ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.clip();
+    ctx.lineWidth = .125; ctx.lineCap = 'butt';
+    const flow = t * .35;
+    [[.24, .085, -.51], [.61, .085, -.45]].forEach(([mid, amp, crest], k) => {
+      ctx.beginPath();
+      for (let u = -1.1; u <= -1.1 + 2.2 * wp + 1e-6; u += .02) {
+        const yy = waveY(u + flow * (k ? 1.3 : 1), mid, amp, crest);
+        u <= -1.1 ? ctx.moveTo(u, yy) : ctx.lineTo(u, yy);
+      }
+      ctx.stroke();
+    });
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -249,7 +272,7 @@ const CROWD = [];
 
 // ================= SCENE A: intro =================
 function sceneIntro(t) {
-  background(t, W / 2, H / 2, 700, FE, 0.06 + 0.14 * prog(t, 0, 1.7), FE);
+  background(t, W / 2, H / 2, 700, FE, 0.03 + 0.07 * prog(t, 0, 1.7), FE);
   const cx = W / 2, cy = H / 2 - 40;
   const zoom = eInExpo(prog(t, 1.35, T_DROP));
   // radar sweep over a crowd of people
@@ -293,13 +316,13 @@ function sceneIntro(t) {
   const line = typed('> find anyone. email + phone. verified.', prog(t, .55, 1.4));
   txt(line + (Math.floor(t * 4) % 2 ? '_' : ' '), cx, cy + 300, CREAM, 'center');
   ctx.globalAlpha = 1;
-  if (zoom > 0) { ctx.fillStyle = rgba(FE, zoom * .9); ctx.fillRect(-60, -60, W + 120, H + 120); }
+  if (zoom > 0) { ctx.fillStyle = rgba(FE, zoom * .95); ctx.fillRect(-60, -60, W + 120, H + 120); }
 }
 
 // ================= SCENE B: hero =================
 function sceneHero(t) {
   const lt = t - T_DROP;
-  background(t, 1450, 520, 760, FE, 0.26, FE);
+  background(t, 1450, 520, 760, CO, 0.2, FE);
   const out = i => eInExpo(prog(t, T_LIST - .45 + i * .04, T_LIST - .1 + i * .04));
   const X = 130;
   const L = [T_DROP, T_DROP + BEAT, T_DROP + BEAT * 2, T_DROP + BEAT * 3];
@@ -323,7 +346,7 @@ function sceneHero(t) {
   font('900 150px IDBlack');
   maskRise('TO FIND', X, 570, eOutExpo(prog(t, L[1] - .03, L[1] + .3)), CREAM, 150);
   ctx.restore();
-  // ANYONE in a violet block
+  // ANYONE in a white block
   ctx.save(); ctx.translate(-out(2) * 1500, 0);
   font('900 150px IDBlack');
   const aw = ctx.measureText('ANYONE').width;
@@ -350,7 +373,7 @@ function sceneHero(t) {
   const cp = eOutExpo(prog(lt, .05, .5));
   ctx.save(); ctx.translate(out(1) * 900 + (1 - cp) * 300, 0); ctx.globalAlpha = cp;
   ctx.save(); ctx.translate(CX + CW / 2, CY + CH / 2); ctx.rotate(-.04 + Math.sin(t * 1.5) * .01); ctx.translate(-CX - CW / 2, -CY - CH / 2);
-  ctx.fillStyle = 'rgba(20,18,30,.92)'; roundRect(CX, CY, CW, CH, 28); ctx.fill();
+  ctx.fillStyle = 'rgba(18,18,18,.94)'; roundRect(CX, CY, CW, CH, 28); ctx.fill();
   ctx.strokeStyle = rgba(FE, .8); ctx.lineWidth = 2; roundRect(CX, CY, CW, CH, 28); ctx.stroke();
   ctx.fillStyle = rgba(FE, .25); ctx.beginPath(); ctx.arc(CX + 90, CY + 100, 50, 0, 7); ctx.fill();
   person(CX + 90, CY + 104, 34, FE2);
@@ -505,7 +528,7 @@ const VIZ = [
       if (rp <= 0) continue;
       const y = SY + 40 + r * 80, x = lerp(SX + 60, cx + 10, rp);
       ctx.globalAlpha = rp;
-      ctx.fillStyle = 'rgba(22,20,34,.95)'; roundRect(x, y, 330, 62, 14); ctx.fill();
+      ctx.fillStyle = 'rgba(20,20,20,.95)'; roundRect(x, y, 330, 62, 14); ctx.fill();
       ctx.strokeStyle = rgba(FE, .7); ctx.lineWidth = 1.5; roundRect(x, y, 330, 62, 14); ctx.stroke();
       person(x + 34, y + 33, 14, FE2);
       ctx.fillStyle = CREAM; ctx.fillRect(x + 62, y + 20, 110 + (r * 31) % 50, 8);
@@ -583,7 +606,7 @@ function scenePrompt(t) {
   const P = PROMPTS[i], lt = t - slotStart(i);
   const acc = i % 2 ? FE : CO;
   const VX = 1440, VY = 470;
-  background(t, VX, VY, 720, acc, .26, i % 2 ? FE : CO);
+  background(t, VX, VY, 720, acc, i % 2 ? .1 : .26, i % 2 ? FE : CO);
   // giant outlined index
   font('900 520px IDBlack');
   ctx.save(); ctx.strokeStyle = rgba(acc, .2); ctx.lineWidth = 2.5; ctx.textAlign = 'left';
@@ -643,7 +666,7 @@ function scenePrompt(t) {
 function sceneStat(t) {
   const j = t < STAT_T[1] ? 0 : t < STAT_T[2] ? 1 : 2;
   const lt = t - STAT_T[j];
-  background(t, W / 2, 520, 900, FE, .22, FE);
+  background(t, W / 2, 520, 900, FE, .09, FE);
   const LX = 130;
   font('600 24px JBM');
   const kick = ['EVERY PROMPT CHECKS 20+ DATA SOURCES', 'THE 1,000-PEOPLE TEST', 'YOU ONLY PAY WHEN IT FINDS SOMETHING'][j];
@@ -661,7 +684,7 @@ function sceneStat(t) {
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(lerp(x, cx, eOutExpo(prog(lt, .1, .5))), lerp(y, cy, eOutExpo(prog(lt, .1, .5)))); ctx.stroke();
       const q = (lt * 1.8 + s * .13) % 1;
       if (lt > .3) { ctx.fillStyle = s % 3 ? FE2 : CO; ctx.beginPath(); ctx.arc(lerp(x, cx, q), lerp(y, cy, q), 4, 0, 7); ctx.fill(); }
-      ctx.fillStyle = 'rgba(22,20,34,.95)'; ctx.strokeStyle = FE; ctx.lineWidth = 2;
+      ctx.fillStyle = 'rgba(20,20,20,.95)'; ctx.strokeStyle = FE; ctx.lineWidth = 2;
       ctx.save(); ctx.translate(x, y); ctx.scale(sp, sp); roundRect(-22, -16, 44, 32, 8); ctx.fill(); ctx.stroke();
       ctx.fillStyle = FE2; for (let l = 0; l < 3; l++) ctx.fillRect(-12, -9 + l * 7, 24 - l * 6, 3); ctx.restore();
     }
@@ -680,12 +703,12 @@ function sceneStat(t) {
     const b = Math.round(910 * eOutCubic(prog(lt, .4, .85)));
     for (let q = 0; q < 1000; q++) {
       const c = Math.floor(q / rows), r = q % rows;
-      ctx.fillStyle = q < a ? GREY : q < b ? FE : rgba(CREAM, .08);
-      if (q >= a && q < b && q > b - 40) ctx.fillStyle = FE2;
+      ctx.fillStyle = q < a ? DIM : q < b ? FE : rgba(CREAM, .06);
+      if (q >= a && q < b && q > b - 40) ctx.fillStyle = CO;
       ctx.fillRect(WX + c * (sz + g) * 1.0, WY + r * (sz + g), sz, sz);
     }
     font('600 18px JBM'); txt('1,000 people · same list', WX, WY - 22, GREY);
-    const bars = [['One data source', 530, GREY, a], ['FullEnrich', 910, FE, b]];
+    const bars = [['One data source', 530, DIM, a], ['FullEnrich', 910, FE, b]];
     bars.forEach(([lab, v, col, cur], q) => {
       const y = 330 + q * 170;
       font('700 34px IDBold'); maskRise(lab, LX, y, eOutExpo(prog(lt, q * .3, q * .3 + .3)), q ? FE2 : CREAM, 34);
@@ -732,7 +755,7 @@ function sceneStat(t) {
 // ================= SCENE E: outro =================
 function sceneOutro(t) {
   const lt = t - T_OUT;
-  background(t, W / 2, H / 2, 900, FE, .3, FE);
+  background(t, W / 2, H / 2, 900, CO, .18, FE);
   // the whole crowd, found — radiating from centre
   for (const c of CROWD) {
     const d = c.d / 1100, fp = prog(lt, d * .5, d * .5 + .2);
