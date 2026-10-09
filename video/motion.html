@@ -1,0 +1,559 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>20 Free Claude Courses</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDSemi;  src: url(fonts/InterDisplay-SemiBold.otf); }
+  @font-face { font-family: IDMed;   src: url(fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(fonts/Newsreader-400.ttf); font-weight: 400; }
+  @font-face { font-family: NR;      src: url(fonts/Newsreader-500.ttf); font-weight: 500; }
+  @font-face { font-family: NR;      src: url(fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+// ---------- palette (Claude brand) ----------
+const C = {
+  orange: '#D97757', deep: '#C15F3C', cream: '#F0EEE6', ivory: '#FAF9F5',
+  tan: '#D4A27F', grey: '#B0AEA5', dim: '#6B6A65',
+};
+const rgba = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+};
+
+// ---------- timing (music: 128 BPM) ----------
+const BEAT = 60 / 128, BAR = BEAT * 4;
+const T_DROP = BAR, T_LIST = BAR * 3, T_OUT = BAR * 7, DUR = 15;
+const KICKS = [];
+for (let b = 1; b < 7; b++) for (let k = 0; k < 4; k++) KICKS.push(b * BAR + k * BEAT);
+KICKS.push(T_OUT, T_OUT + BEAT * 2);
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutCubic = p => 1 - Math.pow(1 - p, 3);
+const eInOutCubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eOutBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+const eInOutExpo = p => p <= 0 ? 0 : p >= 1 ? 1 : p < .5 ? Math.pow(2, 20 * p - 10) / 2 : (2 - Math.pow(2, -20 * p + 10)) / 2;
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(20);
+
+function pulseAt(t, decay = 7) {
+  let p = 0;
+  for (const k of KICKS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * decay));
+  return p;
+}
+function font(f) { ctx.font = f; }
+function txt(s, x, y, color, align = 'left', base = 'alphabetic') {
+  ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(s, x, y);
+}
+// text that rises out of a clipping mask
+function maskRise(s, x, y, p, color, size, align = 'left', dist = 1.15) {
+  if (p <= 0) return;
+  const w = ctx.measureText(s).width;
+  const x0 = align === 'left' ? x : align === 'center' ? x - w / 2 : x - w;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0 - 20, y - size * 1.05, w + 40, size * 1.35); ctx.clip();
+  txt(s, x, y + (1 - p) * size * dist, color, align);
+  ctx.restore();
+}
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+
+// ---------- Claude-style spark ----------
+const RAY_L = [1, .74, .93, .7, .98, .79, .9, .72, 1, .77, .87, .73];
+const RAY_J = RAY_L.map((_, i) => Math.sin(i * 12.9898) * 0.06);
+function spark(x, y, r, p, rot, color = C.orange, alpha = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha *= alpha; ctx.fillStyle = color;
+  for (let i = 0; i < 12; i++) {
+    const pi = clamp((p - i * 0.035) / 0.55);
+    if (pi <= 0) continue;
+    const len = r * RAY_L[i] * eOutBack(pi, 1.4);
+    const a = i * Math.PI / 6 + RAY_J[i];
+    const w0 = r * 0.075, w1 = r * 0.04;
+    const ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+    ctx.beginPath();
+    ctx.moveTo(px * w0, py * w0);
+    ctx.lineTo(ca * len + px * w1, sa * len + py * w1);
+    ctx.arc(ca * len, sa * len, w1, a + Math.PI / 2, a - Math.PI / 2, true);
+    ctx.lineTo(-px * w0, -py * w0);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.11 * clamp(p * 3), 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ---------- course data ----------
+const GROUPS = [
+  { name: ['Foundations'], tag: 'START HERE', courses: [
+    ['Claude 101', 'claude-101'],
+    ['AI Capabilities and Limitations', 'ai-capabilities-and-limitations'],
+    ['AI Fluency: Framework & Foundations', 'ai-fluency-framework-foundations'],
+    ['Introduction to Claude Cowork', 'introduction-to-claude-cowork'],
+  ]},
+  { name: ['Claude Code', '& Agents'], tag: 'BUILD FASTER', courses: [
+    ['Claude Code 101', 'claude-code-101'],
+    ['Claude Code in Action', 'claude-code-in-action'],
+    ['Introduction to Agent Skills', 'introduction-to-agent-skills'],
+    ['Introduction to Subagents', 'introduction-to-subagents'],
+    ['Claude Platform 101', 'claude-platform-101'],
+  ]},
+  { name: ['API, MCP', '& Cloud'], tag: 'SHIP TO PROD', courses: [
+    ['Building with the Claude API', 'claude-with-the-anthropic-api'],
+    ['Introduction to Model Context Protocol (MCP)', 'introduction-to-model-context-protocol'],
+    ['MCP: Advanced Topics', 'model-context-protocol-advanced-topics'],
+    ['Claude with Amazon Bedrock', 'claude-in-amazon-bedrock'],
+    ['Claude on Google Cloud (Vertex AI)', 'claude-with-google-vertex'],
+  ]},
+  { name: ['AI Fluency', 'for Everyone'], tag: 'LEVEL UP', courses: [
+    ['AI Fluency for Builders', 'ai-fluency-for-builders'],
+    ['AI Fluency for Creative Work', 'ai-fluency-for-creative-work'],
+    ['AI Fluency for Small Businesses', 'ai-fluency-for-small-businesses'],
+    ['AI Fluency for Students', 'ai-fluency-for-students'],
+    ['AI Fluency for Educators', 'ai-fluency-for-educators'],
+    ['Teaching AI Fluency', 'teaching-ai-fluency'],
+  ]},
+];
+const ALL = []; GROUPS.forEach((g, gi) => g.courses.forEach((c, ci) => ALL.push({ title: c[0], slug: c[1], gi, ci })));
+// time each course gets "checked" in the list scene
+const groupStart = g => T_LIST + g * BAR;
+const checkTime = (g, i) => groupStart(g) + 0.5 + i * (g === 3 ? 0.15 : 0.18);
+
+// ---------- precomputed layers ----------
+const grains = [];
+for (let k = 0; k < 6; k++) {
+  const g = document.createElement('canvas'); g.width = 960; g.height = 540;
+  const gx = g.getContext('2d'); const im = gx.createImageData(960, 540); const r = mulberry(100 + k);
+  for (let i = 0; i < im.data.length; i += 4) { im.data[i] = im.data[i + 1] = im.data[i + 2] = 255; im.data[i + 3] = r() * 9; }
+  gx.putImageData(im, 0, 0); grains.push(g);
+}
+const dots = document.createElement('canvas'); dots.width = W; dots.height = H;
+{ const d = dots.getContext('2d'); d.fillStyle = C.cream;
+  for (let x = 24; x < W; x += 48) for (let y = 24; y < H; y += 48) { d.beginPath(); d.arc(x, y, 1.2, 0, 7); d.fill(); } }
+const embers = Array.from({ length: 110 }, () => ({ x: rnd() * W, y: rnd() * (H + 200), v: 20 + rnd() * 70, s: .6 + rnd() * 2.2, ph: rnd() * 7, a: .15 + rnd() * .5 }));
+
+// ---------- background ----------
+function background(t, glowX, glowY, glowR, glowA) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pulse = pulseAt(t);
+  const g = ctx.createRadialGradient(glowX, glowY, 0, glowX, glowY, glowR * (1 + pulse * .08));
+  g.addColorStop(0, rgba(C.orange, glowA * (0.75 + pulse * .5)));
+  g.addColorStop(.45, rgba(C.deep, glowA * .25));
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // dot grid with a travelling light band
+  ctx.save(); ctx.globalAlpha = 0.07 + pulse * 0.04; ctx.drawImage(dots, 0, 0); ctx.restore();
+  const bandX = ((t * 420) % (W + 800)) - 400;
+  ctx.save(); ctx.beginPath(); ctx.rect(bandX - 160, 0, 320, H); ctx.clip();
+  ctx.globalAlpha = 0.12; ctx.drawImage(dots, 0, 0); ctx.restore();
+  // embers
+  for (const e of embers) {
+    const y = ((e.y - t * e.v) % (H + 200) + H + 200) % (H + 200) - 100;
+    const x = e.x + Math.sin(t * .9 + e.ph) * 18;
+    ctx.fillStyle = rgba(C.orange, e.a * (0.55 + 0.45 * Math.sin(t * 5 + e.ph)) * (0.6 + pulse * .6));
+    ctx.beginPath(); ctx.arc(x, y, e.s, 0, 7); ctx.fill();
+  }
+}
+function overlays(t, frame) {
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .35, W / 2, H / 2, H * 1.05);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.75)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  // grain
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  // scanline sheen
+  ctx.fillStyle = "rgba(0,0,0,0.10)";
+  for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+function watermark() {
+  const s = 'x.com/nrqa__';
+  ctx.save();
+  font('500 24px IDMed');
+  txt(s, 56, 64, 'rgba(240,238,230,0.42)', 'left', 'middle');
+  txt(s, W - 56, H - 56, 'rgba(240,238,230,0.42)', 'right', 'middle');
+  font('500 30px IDMed');
+  txt(s, W / 2, H / 2, 'rgba(240,238,230,0.17)', 'center', 'middle');
+  ctx.restore();
+}
+
+// ================= SCENE A: intro (0 → drop) =================
+function sceneIntro(t) {
+  background(t, W / 2, H / 2, 700, 0.10 + 0.25 * prog(t, 0, 1.6));
+  const cx = W / 2, cy = H / 2 - 40;
+  // hairline
+  const hp = eOutExpo(prog(t, 0, .6));
+  ctx.fillStyle = rgba(C.orange, 1 - prog(t, .5, 1.0));
+  ctx.fillRect(cx - 760 * hp, cy, 1520 * hp, 2);
+  // loader ring + ticks
+  const rp = eInOutCubic(prog(t, .15, 1.5));
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.strokeStyle = rgba(C.cream, .12); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, 0, 240, 0, 7); ctx.stroke();
+  ctx.strokeStyle = C.orange; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(0, 0, 240, -Math.PI / 2, -Math.PI / 2 + rp * Math.PI * 2); ctx.stroke();
+  ctx.rotate(t * .5);
+  for (let i = 0; i < 72; i++) {
+    const on = i / 72 < rp;
+    ctx.strokeStyle = on ? rgba(C.orange, .8) : rgba(C.cream, .15);
+    ctx.lineWidth = i % 6 === 0 ? 2.5 : 1.2;
+    const a = i / 72 * Math.PI * 2, r0 = 268, r1 = i % 6 === 0 ? 290 : 280;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.stroke();
+  }
+  ctx.restore();
+  // spark: draw, then blow up into a full-screen wipe
+  const blow = eInExpo(prog(t, 1.45, T_DROP));
+  const r = lerp(140, 2600, blow);
+  spark(cx, cy, r, prog(t, .1, 1.1), t * .7 + blow * 2.2);
+  // percentage + typed line
+  const pct = Math.round(rp * 100);
+  ctx.globalAlpha = 1 - blow;
+  font('600 26px JBM'); txt(String(pct).padStart(3, '0') + '%', cx, cy + 350, C.orange, 'center');
+  font('400 30px JBM');
+  const line = typed('> incoming: something free for you', prog(t, .35, 1.25));
+  const cursor = Math.floor(t * 4) % 2 ? '_' : ' ';
+  txt(line + cursor, cx, cy + 410, C.cream, 'center');
+  ctx.globalAlpha = 1;
+}
+
+// ================= SCENE B: 20 FREE CLAUDE AI COURSES =================
+function sceneHero(t) {
+  const lt = t - T_DROP;
+  background(t, 560, 540, 760, 0.28);
+  // giant "20"
+  const cx = 560, base = 790;
+  const sp = prog(lt, 0, .32);
+  const sc = lerp(2.4, 1, eOutBack(sp, 1.2));
+  const n = Math.round(20 * eOutCubic(prog(lt, 0, .55)));
+  const label = String(n).padStart(2, '0');
+  const exit = eInExpo(prog(t, T_LIST - .45, T_LIST - .05));
+  font('500 640px NR');
+  ctx.save();
+  ctx.translate(cx - exit * 300, base - 230); ctx.scale(sc * (1 - exit * .3), sc * (1 - exit * .3)); ctx.translate(0, 230);
+  // motion ghosts while slamming
+  for (let k = 3; k >= 1; k--) {
+    const a = (1 - sp) * .25;
+    if (a <= 0.01) break;
+    ctx.save(); ctx.scale(1 + k * .12 * (1 - sp), 1 + k * .12 * (1 - sp));
+    ctx.strokeStyle = rgba(C.orange, a); ctx.lineWidth = 3; ctx.textAlign = 'center'; ctx.strokeText(label, 0, 0); ctx.restore();
+  }
+  // beat ripples
+  for (const k of KICKS) {
+    const age = (t - k) / .55;
+    if (k < T_DROP + .4 || age < 0 || age > 1) continue;
+    ctx.save(); const s = 1 + age * .22; ctx.translate(0, -230); ctx.scale(s, s); ctx.translate(0, 230);
+    ctx.strokeStyle = rgba(C.orange, .35 * (1 - age)); ctx.lineWidth = 2; ctx.textAlign = 'center'; ctx.strokeText(label, 0, 0); ctx.restore();
+  }
+  const grd = ctx.createLinearGradient(0, -480, 0, 0);
+  grd.addColorStop(0, C.tan); grd.addColorStop(.5, C.orange); grd.addColorStop(1, C.deep);
+  ctx.globalAlpha = 1 - exit;
+  txt(label, 0, 0, grd, 'center');
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  // small kicker above "20"
+  font('600 22px JBM');
+  ctx.globalAlpha = 1 - exit;
+  maskRise('[ NEW DROP · 2026 ]', 560, 236, eOutExpo(prog(lt, .3, .8)), C.grey, 22, 'center');
+  ctx.globalAlpha = 1;
+
+  // right column
+  const X = 1000;
+  const L1 = T_DROP + BEAT, L2 = T_DROP + BEAT * 2, L3 = T_DROP + BEAT * 3, L4 = T_DROP + BEAT * 4;
+  const out = i => eInExpo(prog(t, T_LIST - .5 + i * .05, T_LIST - .1 + i * .05));
+  // FREE in an orange block
+  font('900 150px IDBlack');
+  const fw = ctx.measureText('FREE').width;
+  const bp = eOutExpo(prog(t, L1 - .05, L1 + .3));
+  ctx.save(); ctx.translate(-out(0) * 1400, 0);
+  ctx.fillStyle = C.orange; ctx.fillRect(X - 18, 300, (fw + 40) * bp, 150);
+  ctx.beginPath(); ctx.rect(X - 18, 300, (fw + 40) * bp, 150); ctx.clip();
+  txt('FREE', X + (1 - bp) * -80, 432, '#000');
+  ctx.restore();
+  font('900 124px IDBlack');
+  ctx.save(); ctx.translate(-out(1) * 1400, 0);
+  maskRise('CLAUDE AI', X, 590, eOutExpo(prog(t, L2 - .05, L2 + .35)), C.cream, 124); ctx.restore();
+  ctx.save(); ctx.translate(-out(2) * 1400, 0);
+  maskRise('COURSES', X, 720, eOutExpo(prog(t, L3 - .05, L3 + .35)), C.cream, 124); ctx.restore();
+  // certificate badge row
+  ctx.save(); ctx.translate(-out(3) * 1400, 0);
+  const cp = prog(t, L4 - .1, L4 + .5);
+  if (cp > 0) {
+    const bx = X + 34, by = 812;
+    ctx.strokeStyle = C.orange; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.arc(bx, by, 30, -Math.PI / 2, -Math.PI / 2 + eOutCubic(cp) * Math.PI * 2); ctx.stroke();
+    const ck = prog(t, L4 + .1, L4 + .35);
+    if (ck > 0) {
+      ctx.fillStyle = C.orange; ctx.beginPath(); ctx.arc(bx, by, 30 * eOutBack(ck), 0, 7); ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 5;
+      const pts = [[-12, 1], [-3, 10], [13, -9]]; ctx.beginPath(); ctx.moveTo(bx + pts[0][0], by + pts[0][1]);
+      const k1 = clamp(ck * 2), k2 = clamp(ck * 2 - 1);
+      ctx.lineTo(bx + lerp(pts[0][0], pts[1][0], k1), by + lerp(pts[0][1], pts[1][1], k1));
+      if (k2 > 0) ctx.lineTo(bx + lerp(pts[1][0], pts[2][0], k2), by + lerp(pts[1][1], pts[2][1], k2));
+      ctx.stroke();
+    }
+    font('italic 400 62px NR');
+    maskRise('with certificates', X + 86, 832, eOutExpo(prog(t, L4, L4 + .4)), C.cream, 62);
+  }
+  font('400 24px JBM');
+  ctx.globalAlpha = .9;
+  txt(typed('anthropic.skilljar.com  ·  self-paced  ·  $0', prog(t, L4 + .35, L4 + 1.0)), X, 912, C.grey);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// diagonal wipe between hero and list
+function wipe(t, t0, t1) {
+  const p = prog(t, t0, t1);
+  if (p <= 0 || p >= 1) return;
+  const e = eInOutCubic(p);
+  const skew = 380;
+  const bands = [
+    { off: -520, w: 90, c: C.tan }, { off: -380, w: 40, c: C.cream },
+    { off: 0, w: 2700, c: C.orange }, { off: 2760, w: 60, c: C.deep },
+  ];
+  const x0 = lerp(W + 700, -3600, e);
+  for (const b of bands) {
+    const x = x0 + b.off;
+    ctx.fillStyle = b.c; ctx.beginPath();
+    ctx.moveTo(x + skew, 0); ctx.lineTo(x + skew + b.w, 0); ctx.lineTo(x + b.w, H); ctx.lineTo(x, H); ctx.closePath(); ctx.fill();
+  }
+  // spark riding the wipe
+  spark(x0 + 1350 + skew / 2, H / 2, 210, 1, t * 3, '#000', 1);
+}
+
+// ================= SCENE C: the 20 courses =================
+function sceneList(t) {
+  background(t, 380, 520, 680, 0.22);
+  const g = clamp(Math.floor((t - T_LIST) / BAR), 0, 3);
+  const gs = groupStart(g), ge = gs + BAR;
+  const grp = GROUPS[g];
+  const exitP = i => g === 3 ? 0 : eInExpo(prog(t, ge - .3 + i * .025, ge - .02 + i * .025));
+  const enter0 = gs + (g === 0 ? .2 : 0);
+
+  // --- left panel ---
+  const LX = 130;
+  font('500 380px NR');
+  ctx.save();
+  ctx.strokeStyle = rgba(C.orange, .16 * (1 - exitP(0)) * eOutCubic(prog(t, enter0, enter0 + .4)));
+  ctx.lineWidth = 2; ctx.textAlign = 'left';
+  ctx.strokeText('0' + (g + 1), LX - 20 + (t - gs) * 30, 900);
+  ctx.restore();
+  spark(LX + 18, 300, 22, 1, t * 2.2, C.orange, 1 - exitP(0));
+  font('600 22px JBM');
+  maskRise(`CHAPTER 0${g + 1} / 04  ·  ${grp.tag}`, LX + 54, 308, eOutExpo(prog(t, enter0, enter0 + .35)) * (1 - exitP(0)), C.orange, 22);
+  font('500 92px NR');
+  grp.name.forEach((ln, i) => {
+    const p = eOutExpo(prog(t, enter0 + .05 + i * .07, enter0 + .5 + i * .07));
+    ctx.save(); ctx.translate(0, -exitP(i) * 120); ctx.globalAlpha = 1 - exitP(i);
+    maskRise(ln, LX, 440 + i * 100, p, C.cream, 92); ctx.restore();
+  });
+  const first = ALL.findIndex(c => c.gi === g) + 1, last = first + grp.courses.length - 1;
+  font('400 24px JBM');
+  ctx.globalAlpha = (1 - exitP(2)) * eOutCubic(prog(t, enter0 + .2, enter0 + .5));
+  txt(`courses ${String(first).padStart(2, '0')} — ${String(last).padStart(2, '0')}`, LX, 440 + grp.name.length * 100 + 10, C.grey);
+  ctx.globalAlpha = 1;
+
+  // divider with progress fill
+  const DX = 700;
+  ctx.fillStyle = rgba(C.cream, .12); ctx.fillRect(DX, 180, 1.5, 740);
+  const totalP = prog(t, T_LIST, T_OUT);
+  ctx.fillStyle = C.orange; ctx.fillRect(DX - 1, 180, 3.5, 740 * eInOutCubic(totalP));
+
+  // header
+  font('600 20px JBM');
+  txt('20 FREE COURSES  ·  CERTIFICATE INCLUDED', W - 120, 128, rgba(C.orange, .9), 'right');
+
+  // --- rows ---
+  const n = grp.courses.length;
+  const rowH = n === 6 ? 112 : n === 5 ? 128 : 150;
+  const top = 540 - (rowH * n) / 2 + 10;
+  const RX = 790, RW = W - 120 - RX;
+  grp.courses.forEach((c, i) => {
+    const idx = ALL.findIndex(a => a.slug === c[1]) + 1;
+    const ep = eOutExpo(prog(t, enter0 + .06 + i * .07, enter0 + .6 + i * .07));
+    const xp = exitP(i + 1);
+    if (ep <= 0 || xp >= 1) return;
+    const y = top + i * rowH + (1 - ep) * 70 - xp * 90;
+    const xo = (1 - ep) * 120;
+    ctx.save(); ctx.globalAlpha = ep * (1 - xp); ctx.translate(xo, 0);
+    // ping highlight when checked
+    const ct = checkTime(g, i);
+    const ping = t >= ct ? Math.exp(-(t - ct) * 4) : 0;
+    const checked = t >= ct;
+    if (ping > 0.01) {
+      const hg = ctx.createLinearGradient(RX - 30, 0, RX + RW, 0);
+      hg.addColorStop(0, rgba(C.orange, .32 * ping)); hg.addColorStop(1, rgba(C.orange, 0));
+      ctx.fillStyle = hg; ctx.fillRect(RX - 30, y, RW + 30, rowH - 8);
+    }
+    // separator + orange sweep
+    ctx.fillStyle = rgba(C.cream, .1); ctx.fillRect(RX, y + rowH - 4, RW, 1);
+    ctx.fillStyle = C.orange; ctx.fillRect(RX, y + rowH - 4.5, RW * eOutExpo(prog(t, ct - .1, ct + .35)), 2);
+    // number
+    font('600 26px JBM'); txt(String(idx).padStart(2, '0'), RX, y + rowH * .5 - 2, checked ? C.orange : C.dim);
+    // title
+    let tsize = n === 6 ? 46 : 52;
+    font(`500 ${tsize}px NR`);
+    const maxT = RW - 76 - 90, mw = ctx.measureText(c[0]).width;
+    if (mw > maxT) { tsize = Math.floor(tsize * maxT / mw); font(`500 ${tsize}px NR`); }
+    txt(c[0], RX + 76, y + rowH * .5 + 4, C.cream);
+    // url
+    font('400 19px JBM');
+    const dom = 'anthropic.skilljar.com/';
+    txt(dom, RX + 78, y + rowH * .5 + 36, C.dim);
+    const dw = ctx.measureText(dom).width;
+    txt(c[1], RX + 78 + dw, y + rowH * .5 + 36, checked ? C.tan : C.grey);
+    // arrow -> check
+    const ax = RX + RW - 30, ay = y + rowH * .5 - 6;
+    const ck = prog(t, ct, ct + .25);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (ck <= 0) {
+      ctx.strokeStyle = rgba(C.cream, .4); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(ax - 14, ay); ctx.lineTo(ax + 12, ay); ctx.moveTo(ax + 3, ay - 9); ctx.lineTo(ax + 12, ay); ctx.lineTo(ax + 3, ay + 9); ctx.stroke();
+    } else {
+      ctx.fillStyle = C.orange; ctx.beginPath(); ctx.arc(ax, ay, 24 * eOutBack(ck, 2.2), 0, 7); ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+      const k1 = clamp(ck * 2), k2 = clamp(ck * 2 - 1);
+      ctx.beginPath(); ctx.moveTo(ax - 10, ay + 1);
+      ctx.lineTo(ax - 10 + 7 * k1, ay + 1 + 8 * k1);
+      if (k2 > 0) ctx.lineTo(ax - 3 + 14 * k2, ay + 9 - 16 * k2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  });
+
+  // --- bottom progress: 20 segments ---
+  const done = ALL.filter(a => t >= checkTime(a.gi, a.ci)).length;
+  const BX = 130, BW = W - 260, seg = (BW - 19 * 8) / 20, BY = 985;
+  ALL.forEach((a, j) => {
+    const ct = checkTime(a.gi, a.ci);
+    const f = eOutExpo(prog(t, ct, ct + .3));
+    ctx.fillStyle = rgba(C.cream, .12); ctx.fillRect(BX + j * (seg + 8), BY, seg, 6);
+    ctx.fillStyle = C.orange; ctx.fillRect(BX + j * (seg + 8), BY, seg * f, 6);
+  });
+  font('600 22px JBM');
+  txt(`${String(done).padStart(2, '0')}/20`, BX, BY - 18, C.cream);
+  font('400 22px JBM');
+  txt('unlocked', BX + 82, BY - 18, C.grey);
+}
+
+// ================= SCENE D: outro =================
+function wrapLines(s, maxW) {
+  const words = s.split(' '); const lines = []; let cur = '';
+  for (const w of words) { const tt = cur ? cur + ' ' + w : w; if (ctx.measureText(tt).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tt; }
+  if (cur) lines.push(cur); return lines.slice(0, 2);
+}
+function sceneOutro(t, frame) {
+  const lt = t - T_OUT;
+  background(t, W / 2, H / 2, 900, 0.30);
+  // grid of all 20 tiles
+  const cols = 5, tw = 300, th = 150, gap = 20;
+  const gw = cols * tw + (cols - 1) * gap, gh = 4 * th + 3 * gap;
+  const ox = (W - gw) / 2, oy = (H - gh) / 2;
+  const collapse = eInExpo(prog(lt, .78, 1.1));
+  if (collapse < 1) {
+    ALL.forEach((a, j) => {
+      const c = j % cols, r = Math.floor(j / cols);
+      const x = ox + c * (tw + gap) + tw / 2, y = oy + r * (th + gap) + th / 2;
+      const d = Math.hypot(x - W / 2, y - H / 2) / 900;
+      const p = eOutBack(prog(lt, d * .25, d * .25 + .3), 1.6);
+      if (p <= 0) return;
+      const fx = lerp(x, W / 2, collapse), fy = lerp(y, H / 2, collapse);
+      ctx.save(); ctx.translate(fx, fy); ctx.rotate(collapse * (j % 2 ? 1 : -1) * .8);
+      const s = p * (1 - collapse); ctx.scale(s, s);
+      const isLit = Math.floor(lt * 18) % 20 === (j * 7) % 20;
+      ctx.fillStyle = isLit ? rgba(C.orange, .22) : 'rgba(20,18,16,0.92)';
+      ctx.fillRect(-tw / 2, -th / 2, tw, th);
+      ctx.strokeStyle = rgba(C.orange, .75); ctx.lineWidth = 1.5; ctx.strokeRect(-tw / 2, -th / 2, tw, th);
+      font('500 46px NR'); txt(String(j + 1).padStart(2, '0'), -tw / 2 + 20, -th / 2 + 58, C.orange);
+      font('600 19px IDSemi');
+      wrapLines(a.title, tw - 40).forEach((ln, k) => txt(ln, -tw / 2 + 20, th / 2 - 46 + k * 24, C.cream));
+      ctx.restore();
+    });
+  }
+  // flash on impact
+  const fl = lt >= 0 ? Math.exp(-lt * 9) : 0;
+  if (fl > .01) { ctx.fillStyle = rgba(C.cream, .55 * fl); ctx.fillRect(0, 0, W, H); }
+
+  // final card
+  const fp = prog(lt, .95, 1.875);
+  if (fp > 0) {
+    const sr = 80 * eOutBack(prog(lt, .95, 1.3), 1.5);
+    // radiating rings from the spark
+    for (let k = 0; k < 3; k++) {
+      const age = ((lt - .95) * .9 + k / 3) % 1;
+      ctx.strokeStyle = rgba(C.orange, .35 * (1 - age)); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(W / 2, 330, 90 + age * 420, 0, 7); ctx.stroke();
+    }
+    spark(W / 2, 330, sr, prog(lt, .9, 1.4), lt * 1.4);
+    font('500 112px NR');
+    const head1 = 'Start learning, ';
+    ctx.font = '500 112px NR'; const w1 = ctx.measureText(head1).width;
+    ctx.font = 'italic 400 112px NR'; const w2 = ctx.measureText('free.').width;
+    const hx = W / 2 - (w1 + w2) / 2, hy = 600;
+    font('500 112px NR'); maskRise(head1, hx, hy, eOutExpo(prog(lt, 1.05, 1.45)), C.cream, 112);
+    font('italic 400 112px NR'); maskRise('free.', hx + w1, hy, eOutExpo(prog(lt, 1.15, 1.55)), C.orange, 112);
+    font('600 36px JBM');
+    const url = 'anthropic.skilljar.com';
+    const up = prog(lt, 1.2, 1.55);
+    const shown = typed(url, up);
+    const uw = ctx.measureText(url).width;
+    txt(shown + (up < 1 || Math.floor(t * 4) % 2 ? '' : '_'), W / 2 - uw / 2, 700, C.cream);
+    ctx.fillStyle = C.orange; ctx.fillRect(W / 2 - uw / 2, 718, uw * eOutExpo(prog(lt, 1.4, 1.75)), 3);
+    font('500 26px IDMed');
+    ctx.globalAlpha = eOutCubic(prog(lt, 1.45, 1.75));
+    txt('20 courses  ·  certificates included  ·  self-paced', W / 2, 790, C.grey, 'center');
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ================= master render =================
+window.render = function (t, frame = 0) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  // camera: shake on impacts + subtle zoom bump on every kick
+  let sx = 0, sy = 0;
+  for (const it of [T_DROP, T_OUT]) if (t >= it) { const a = 16 * Math.exp(-(t - it) * 7); sx += Math.sin(t * 91) * a; sy += Math.cos(t * 77) * a; }
+  const z = 1 + pulseAt(t, 9) * .008;
+  ctx.setTransform(z, 0, 0, z, W / 2 * (1 - z) + sx, H / 2 * (1 - z) + sy);
+
+  if (t < T_DROP) sceneIntro(t);
+  else if (t < T_LIST) sceneHero(t);
+  else if (t < T_OUT) sceneList(t);
+  else sceneOutro(t, frame);
+
+  if (t >= T_DROP && t < T_DROP + .3) { // drop flash
+    ctx.fillStyle = rgba(C.orange, .65 * Math.exp(-(t - T_DROP) * 14)); ctx.fillRect(-50, -50, W + 100, H + 100);
+  }
+  wipe(t, T_LIST - .4, T_LIST + .45);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  overlays(t, frame);
+  watermark();
+};
+
+window.ready = (async () => {
+  const fams = ['900 50px IDBlack', '600 50px IDSemi', '500 50px IDMed', '500 50px NR', '400 50px NR', 'italic 400 50px NR', '400 50px JBM', '600 50px JBM'];
+  await Promise.all(fams.map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  return true;
+})();
+if (!navigator.webdriver) {
+  (async () => { await window.ready; const t0 = performance.now(); const loop = () => { const t = ((performance.now() - t0) / 1000) % DUR; render(t, Math.floor(t * 60)); requestAnimationFrame(loop); }; loop(); })();
+}
+</script>
+</body>
+</html>
