@@ -1,2 +1,2 @@
-video/build/
+video/**/build/
 node_modules/
