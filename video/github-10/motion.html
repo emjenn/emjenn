@@ -1,0 +1,659 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>10 Free GitHub Repos</title>
+<style>
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-500.woff2); font-weight: 500; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-600.woff2); font-weight: 600; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-700.woff2); font-weight: 700; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-800.woff2); font-weight: 800; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-900.woff2); font-weight: 900; }
+  @font-face { font-family: Mona; src: url(../fonts/MonaSans-800i.woff2); font-weight: 800; font-style: italic; }
+  @font-face { font-family: Hubot; src: url(../fonts/HubotSans-800.woff2); font-weight: 800; }
+  @font-face { font-family: Hubot; src: url(../fonts/HubotSans-900.woff2); font-weight: 900; }
+  @font-face { font-family: Neon; src: url(../fonts/MonaspaceNeon-400.woff2); font-weight: 400; }
+  @font-face { font-family: Neon; src: url(../fonts/MonaspaceNeon-600.woff2); font-weight: 600; }
+  @font-face { font-family: Neon; src: url(../fonts/MonaspaceNeon-700.woff2); font-weight: 700; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const mk = (w = W, h = H) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const layer = mk(), lctx = layer.getContext('2d');
+
+// ---------- palette (GitHub Primer, dark) ----------
+const C = {
+  bg: '#000000', canvas: '#0D1117', surface: '#161B22', btn: '#21262D', border: '#30363D', faint: '#484F58',
+  fg: '#F0F6FC', text: '#C9D1D9', muted: '#8B949E',
+  green: '#3FB950', green2: '#2EA043', greenBtn: '#238636', blue: '#58A6FF', purple: '#A371F7',
+  orange: '#F0883E', pink: '#DB61A2', yellow: '#E3B341', red: '#F85149',
+  g0: '#161B22', g1: '#0E4429', g2: '#006D32', g3: '#26A641', g4: '#39D353',
+};
+const GREENS = [C.g0, C.g1, C.g2, C.g3, C.g4];
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+
+// ---------- timing (music: 128 BPM, 8 bars = 15s) ----------
+const BEAT = 60 / 128, BAR = BEAT * 4, DUR = 15;
+const T_DROP = BAR, T_REPO = BAR * 2, T_OUT = BAR * 7, SLOT = BEAT * 2;
+const KICKS = [];
+for (let b = 1; b < 7; b++) for (let k = 0; k < 4; k++) KICKS.push(b * BAR + k * BEAT);
+KICKS.push(T_OUT, T_OUT + BEAT * 2);
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutCubic = p => 1 - Math.pow(1 - p, 3);
+const eInCubic = p => p * p * p;
+const eInOutCubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eOutBack = (p, s = 1.7) => p <= 0 ? 0 : 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(1010);
+function pulseAt(t, decay = 7) { let p = 0; for (const k of KICKS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * decay)); return p; }
+function font(f, c = ctx) { c.font = f; }
+function txt(s, x, y, color, align = 'left', base = 'alphabetic', c = ctx) { c.fillStyle = color; c.textAlign = align; c.textBaseline = base; c.fillText(s, x, y); }
+function fit(s, weight, fam, max, maxW) { ctx.font = `${weight} ${max}px ${fam}`; const w = ctx.measureText(s).width; return w > maxW ? Math.floor(max * maxW / w) : max; }
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+function wrap(s, maxW) {
+  const words = s.split(' '), lines = []; let cur = '';
+  for (const w of words) { const tt = cur ? cur + ' ' + w : w; if (ctx.measureText(tt).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tt; }
+  if (cur) lines.push(cur); return lines;
+}
+function rrect(x, y, w, h, r, c = ctx) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+// text rising out of a clip mask, per-character stagger (keeps kerning via prefix measuring)
+function riseChars(s, x, y, size, t0, t, color, stagger = .018, dur = .32, align = 'left') {
+  const w = ctx.measureText(s).width;
+  const x0 = align === 'left' ? x : align === 'center' ? x - w / 2 : x - w;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 30, y - size * 1.05, w + 60, size * 1.4); ctx.clip();
+  ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i < s.length; i++) {
+    const p = eOutExpo(prog(t, t0 + i * stagger, t0 + i * stagger + dur));
+    if (p <= 0) continue;
+    const cx = x0 + ctx.measureText(s.slice(0, i)).width;
+    ctx.fillText(s[i], cx, y + (1 - p) * size * 1.1);
+  }
+  ctx.restore();
+}
+function maskRise(s, x, y, p, color, size, align = 'left') {
+  if (p <= 0) return;
+  const w = ctx.measureText(s).width;
+  const x0 = align === 'left' ? x : align === 'center' ? x - w / 2 : x - w;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 20, y - size * 1.05, w + 40, size * 1.4); ctx.clip();
+  txt(s, x, y + (1 - p) * size * 1.15, color, align); ctx.restore();
+}
+function hash7(s) { let h = 2166136261; for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16).padStart(8, '0').slice(0, 7); }
+
+// ---------- icons (drawn, Octicon-style) ----------
+function iconRepo(x, y, s, color) { // book
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 16, s / 16);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(3, 13); ctx.lineTo(3, 3); ctx.quadraticCurveTo(3, 1.5, 4.5, 1.5); ctx.lineTo(13, 1.5); ctx.lineTo(13, 11.5); ctx.lineTo(4.5, 11.5);
+  ctx.quadraticCurveTo(3, 11.5, 3, 13); ctx.quadraticCurveTo(3, 14.5, 4.5, 14.5); ctx.lineTo(6, 14.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(7, 13); ctx.lineTo(7, 16); ctx.lineTo(8.25, 15); ctx.lineTo(9.5, 16); ctx.lineTo(9.5, 13); ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  ctx.restore();
+}
+function starPath(cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .45 : r; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
+  ctx.closePath();
+}
+function iconFork(x, y, s, color) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 16, s / 16); ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  for (const [a, b] of [[4, 3], [12, 3], [8, 13]]) { ctx.beginPath(); ctx.arc(a, b, 1.8, 0, 7); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(4, 5); ctx.lineTo(4, 6.5); ctx.quadraticCurveTo(4, 8, 6, 8); ctx.lineTo(10, 8); ctx.quadraticCurveTo(12, 8, 12, 6.5); ctx.lineTo(12, 5);
+  ctx.moveTo(8, 8); ctx.lineTo(8, 11); ctx.stroke(); ctx.restore();
+}
+function cursor(x, y, press = 0, a = 1) {
+  if (a <= 0) return;
+  ctx.save(); ctx.translate(x, y); const s = 1.5 * (1 - press * .18); ctx.scale(s, s); ctx.globalAlpha *= a;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 23); ctx.lineTo(6, 17.5); ctx.lineTo(10, 26); ctx.lineTo(13.5, 24.5); ctx.lineTo(9.5, 16.5); ctx.lineTo(17, 16.5); ctx.closePath();
+  ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
+}
+
+// ---------- data ----------
+const ACC = [C.green, C.blue, C.purple, C.orange, C.pink, C.yellow, C.green, C.blue, C.purple, C.orange];
+const REPOS = [
+  ['Archify', 'tt-a1i', 'archify', 'An agent skill that turns your codebase into interactive architecture, workflow, sequence and data-flow diagrams.'],
+  ['OpenMAIC', 'THU-MAIC', 'OpenMAIC', 'A multi-agent interactive classroom: AI teachers and classmates turn any topic or document into a full lesson.'],
+  ['DeepSeek Harness', 'deepseek-ai', 'deepseek-harness', "DeepSeek's open-source agent harness, built so everything is a plugin."],
+  ['Ponytail', 'DietrichGebert', 'ponytail', 'Makes your AI coding agent think like the laziest senior dev in the room, so it writes way less code.'],
+  ['Agent Skills', 'addyosmani', 'agent-skills', 'Production-grade engineering skills for AI coding agents.'],
+  ['OmniVoice Studio', 'debpalash', 'OmniVoice-Studio', 'A local, open-source ElevenLabs alternative for voice cloning, TTS and dubbing.'],
+  ['Scientific Agent Skills', 'K-Dense-AI', 'scientific-agent-skills', 'Turn any AI agent into an AI scientist, with 160+ ready-to-use research skills.'],
+  ['Orca', 'stablyai', 'orca', 'Run a fleet of AI coding agents in parallel, each in its own worktree, all tracked in one place.'],
+  ['MiniMind', 'jingyaogong', 'minimind', 'Train a tiny 64M-parameter LLM from scratch in about 2 hours.'],
+  ["God's Eye View", 'bilawalsidhu', 'gods-eye-view', 'A spy satellite simulator in your browser, powered by real live data on a 3D globe.'],
+].map(([name, owner, repo, desc], i) => ({ name, owner, repo, desc, acc: ACC[i], hash: hash7(owner + repo) }));
+
+// ---------- precomputed textures ----------
+const dots = mk(); { const d = dots.getContext('2d'); d.fillStyle = '#fff'; for (let y = 18; y < H; y += 36) for (let x = 18; x < W; x += 36) { d.beginPath(); d.arc(x, y, 1.3, 0, 7); d.fill(); } }
+const grains = []; for (let g = 0; g < 6; g++) { const c = mk(W / 2, H / 2), d = c.getContext('2d'), im = d.createImageData(W / 2, H / 2);
+  for (let i = 0; i < im.data.length; i += 4) { const v = rnd() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 13; } d.putImageData(im, 0, 0); grains.push(c); }
+const motes = Array.from({ length: 46 }, () => ({ x: rnd() * W, y: rnd() * H, s: 5 + rnd() * 9, v: 18 + rnd() * 50, ph: rnd() * 7, lvl: 1 + Math.floor(rnd() * 4) }));
+
+// contribution graph (intro)
+const GC = 48, GR = 7, CELL = 26, PITCH = 32, GX = (W - GC * PITCH + (PITCH - CELL)) / 2, GY = 452;
+const GLV = Array.from({ length: GC * GR }, () => { const r = rnd(); return r < .35 ? 0 : r < .6 ? 1 : r < .8 ? 2 : r < .93 ? 3 : 4; });
+const GDL = Array.from({ length: GC * GR }, () => rnd());
+const ONE = ['..#..', '.##..', '#.#..', '..#..', '..#..', '..#..', '#####'];
+const ZERO = ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'];
+const GLYPH = new Set(); const GCOL0 = 18;
+for (let r = 0; r < 7; r++) for (let c = 0; c < 5; c++) { if (ONE[r][c] === '#') GLYPH.add(r * GC + GCOL0 + c); if (ZERO[r][c] === '#') GLYPH.add(r * GC + GCOL0 + 7 + c); }
+const GLYPH_CX = GX + (GCOL0 + 6) * PITCH - (PITCH - CELL) / 2 - PITCH / 2 + CELL / 2, GLYPH_CY = GY + 3 * PITCH + CELL / 2;
+
+// ---------- background ----------
+function background(t, gx, gy, gr, acc, ga) {
+  ctx.fillStyle = '#000'; ctx.fillRect(-60, -60, W + 120, H + 120);
+  const pulse = pulseAt(t);
+  // two slow "universe" glows
+  const blobs = [[gx, gy, gr * (1 + pulse * .07), acc, ga * (.8 + pulse * .45)],
+    [W * .82 + Math.sin(t * .7) * 120, H * .2 + Math.cos(t * .5) * 80, 620, C.purple, ga * .45],
+    [W * .15 + Math.cos(t * .6) * 100, H * .9, 560, C.blue, ga * .3]];
+  for (const [x, y, r, c, a] of blobs) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rgba(c, a)); g.addColorStop(.5, rgba(c, a * .25)); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  ctx.save(); ctx.globalAlpha = .07 + pulse * .05; ctx.drawImage(dots, 0, 0); ctx.restore();
+  // travelling scan band over the dot grid
+  const by = ((t * 380) % (H + 600)) - 300;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, by - 110, W, 220); ctx.clip(); ctx.globalAlpha = .14; ctx.drawImage(dots, 0, 0); ctx.restore();
+  // drifting contribution squares
+  for (const m of motes) {
+    const y = ((m.y - t * m.v) % (H + 100) + H + 100) % (H + 100) - 50;
+    const x = m.x + Math.sin(t * .8 + m.ph) * 20;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(Math.sin(t + m.ph) * .4);
+    ctx.fillStyle = rgba(GREENS[m.lvl], (.18 + .2 * Math.sin(t * 3 + m.ph) ** 2) * (.6 + pulse * .6));
+    rrect(-m.s / 2, -m.s / 2, m.s, m.s, 2); ctx.fill(); ctx.restore();
+  }
+}
+function overlays(t, frame) {
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * .45, W / 2, H / 2, H * 1.1);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.6)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.08)'; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+function watermark() {
+  const s = 'x.com/nrqa__';
+  ctx.save();
+  font('600 24px Neon');
+  txt(s, 56, 62, 'rgba(240,246,252,0.42)', 'left', 'middle');
+  txt(s, W - 56, H - 54, 'rgba(240,246,252,0.42)', 'right', 'middle');
+  font('600 30px Neon');
+  txt(s, W / 2, H / 2, 'rgba(240,246,252,0.15)', 'center', 'middle');
+  ctx.restore();
+}
+// horizontal slice displacement of the finished frame (digital glitch)
+function sliceGlitch(amount, seed) {
+  if (amount <= .02) return;
+  const r = mulberry(seed);
+  for (let k = 0; k < 7; k++) {
+    const y = Math.floor(r() * H), h = Math.floor(10 + r() * 70), dx = (r() - .5) * 2 * 90 * amount;
+    ctx.drawImage(cv, 0, y, W, h, dx, y, W, h);
+  }
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .35 * amount;
+  ctx.drawImage(cv, 12 * amount, 0); ctx.restore();
+}
+
+// ================= SCENE A: intro (0 → drop) =================
+function sceneIntro(t) {
+  background(t, W / 2, 560, 760, C.green, .05 + .12 * prog(t, .3, 1.6));
+  // camera dives into the pixel "10"
+  const dive = eInExpo(prog(t, 1.32, T_DROP));
+  const z = lerp(1, 26, dive);
+  ctx.save(); ctx.translate(GLYPH_CX, GLYPH_CY); ctx.scale(z, z); ctx.translate(-GLYPH_CX, -GLYPH_CY);
+  // terminal prompt
+  const cmd = 'gh search repos "almost illegal" --price=0';
+  font('600 34px Neon');
+  const full = '$ ' + cmd, fw = ctx.measureText(full).width, tx = W / 2 - fw / 2;
+  const tp = prog(t, .05, .62);
+  ctx.globalAlpha = 1 - prog(t, 1.1, 1.35);
+  txt('$', tx, 330, C.green);
+  const shown = typed(cmd, tp);
+  txt(shown, tx + ctx.measureText('$ ').width, 330, C.fg);
+  if (Math.floor(t * 5) % 2 || tp < 1) { const cx = tx + ctx.measureText('$ ' + shown).width + 4; ctx.fillStyle = C.green; ctx.fillRect(cx, 302, 18, 34); }
+  font('400 24px Neon');
+  const found = Math.round(10 * eOutCubic(prog(t, .7, 1.25)));
+  txt(tp >= 1 ? `→ ${found} results  ·  sorting by "how is this free?"` : '', W / 2, 392, C.muted, 'center');
+  ctx.globalAlpha = 1;
+  // contribution graph
+  const form = eOutCubic(prog(t, .82, 1.2));
+  for (let r = 0; r < GR; r++) for (let c = 0; c < GC; c++) {
+    const i = r * GC + c;
+    const d = c / GC * .55 + r * .02 + GDL[i] * .08;
+    const p = eOutBack(prog(t, .18 + d, .38 + d), 2);
+    if (p <= 0) continue;
+    const inG = GLYPH.has(i);
+    let col = GREENS[GLV[i]];
+    let a = 1;
+    if (form > 0) { if (inG) col = C.g4; else { a = lerp(1, .35, form); col = GREENS[Math.min(GLV[i], 1)]; } }
+    const x = GX + c * PITCH + CELL / 2, y = GY + r * PITCH + CELL / 2;
+    const s = CELL * p * (inG ? 1 + .25 * Math.sin(Math.PI * prog(t, .82 + c * .004, 1.05 + c * .004)) : 1);
+    ctx.globalAlpha = a; ctx.fillStyle = col; rrect(x - s / 2, y - s / 2, s, s, 5); ctx.fill();
+    if (inG && form > 0) { ctx.globalAlpha = form * .5; ctx.shadowColor = C.g4; ctx.shadowBlur = 24; ctx.fill(); ctx.shadowBlur = 0; }
+  }
+  ctx.globalAlpha = 1;
+  // legend
+  font('400 20px Neon'); ctx.globalAlpha = eOutCubic(prog(t, .5, .9)) * (1 - prog(t, 1.1, 1.3));
+  txt('Less', GX + GC * PITCH - 6 * PITCH - 70, GY + GR * PITCH + 40, C.muted, 'right');
+  for (let k = 0; k < 5; k++) { ctx.fillStyle = GREENS[k]; rrect(GX + GC * PITCH - 6 * PITCH - 60 + k * 26, GY + GR * PITCH + 24, 20, 20, 4); ctx.fill(); }
+  txt('More', GX + GC * PITCH - 6 * PITCH + 76, GY + GR * PITCH + 40, C.muted);
+  txt('contributions to your free-stuff list', GX, GY + GR * PITCH + 40, C.muted);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  // green-out right before the drop
+  const g = prog(t, 1.72, T_DROP);
+  if (g > 0) { ctx.fillStyle = rgba(C.g4, g * .9); ctx.fillRect(0, 0, W, H); }
+}
+
+// ================= SCENE B: title =================
+const tenLayer = mk(760, 760);
+function sceneTitle(t, frame) {
+  const lt = t - T_DROP;
+  background(t, 430, 520, 720, C.green, .22);
+  const B = [0, BEAT, BEAT * 2, BEAT * 3];
+  // giant "10" with pixel texture, slams in
+  const sp = prog(lt, 0, .3);
+  const sc = lerp(2.6, 1, eOutBack(sp, 1.3));
+  const L = tenLayer.getContext('2d');
+  L.clearRect(0, 0, 760, 760);
+  L.font = '900 620px Hubot'; L.textAlign = 'center'; L.textBaseline = 'alphabetic';
+  const gr = L.createLinearGradient(0, 120, 0, 700); gr.addColorStop(0, '#7CF29A'); gr.addColorStop(.45, C.g4); gr.addColorStop(1, C.g2);
+  L.fillStyle = gr; L.fillText('10', 380, 650);
+  L.globalCompositeOperation = 'source-atop';
+  L.fillStyle = 'rgba(0,0,0,0.55)';
+  for (let x = 0; x < 760; x += 22) L.fillRect(x, 0, 4, 760);
+  for (let y = 0; y < 760; y += 22) L.fillRect(0, y, 760, 4);
+  const sweepX = ((lt * 900) % 1400) - 300;
+  const sg = L.createLinearGradient(sweepX - 120, 0, sweepX + 120, 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(.5, 'rgba(255,255,255,.55)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  L.fillStyle = sg; L.fillRect(0, 0, 760, 760);
+  L.globalCompositeOperation = 'source-over';
+  const cx = 430, cy = 540;
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(sc, sc);
+  for (let k = 3; k >= 1; k--) { const a = (1 - sp) * .3; if (a < .01) break; ctx.save(); ctx.globalAlpha = a / k; const s = 1 + k * .14 * (1 - sp); ctx.scale(s, s); ctx.drawImage(tenLayer, -380, -400); ctx.restore(); }
+  for (const k of KICKS) { const age = (t - k) / .5; if (k < T_DROP + .2 || age < 0 || age > 1) continue; ctx.save(); ctx.globalAlpha = .28 * (1 - age); const s = 1 + age * .18; ctx.scale(s, s); ctx.drawImage(tenLayer, -380, -400); ctx.restore(); }
+  ctx.drawImage(tenLayer, -380, -400);
+  ctx.restore();
+  // kicker under the 10
+  font('600 22px Neon');
+  maskRise('// open source · $0.00 · no trial', cx, 880, eOutExpo(prog(lt, .25, .6)), C.muted, 22, 'center');
+
+  // right column
+  const X = 860, MW = 960;
+  font('600 22px Neon');
+  maskRise('$ cat README.md', X, 200, eOutExpo(prog(lt, .05, .35)), C.green, 22);
+  let s1 = fit('GITHUB REPOSITORIES', 900, 'Mona', 110, MW); font(`900 ${s1}px Mona`);
+  riseChars('GITHUB REPOSITORIES', X, 310, s1, B[0] + .02, lt, C.fg, .014);
+  let s2 = fit('THAT FEEL ALMOST', 800, 'Mona', s1, MW); font(`800 ${s2}px Mona`);
+  riseChars('THAT FEEL ALMOST', X, 310 + s1 * 1.08, s2, B[1] - .03, lt, C.muted, .014);
+  // ILLEGAL: red redaction bar sweeps over, then glitches
+  const IY = 310 + s1 * 1.08 + 228;
+  const s3 = fit('ILLEGAL', 900, 'Hubot', 236, MW); font(`900 ${s3}px Hubot`);
+  const iw = ctx.measureText('ILLEGAL').width;
+  const barIn = eOutExpo(prog(lt, B[2] - .06, B[2] + .1)), barOut = eInOutCubic(prog(lt, B[2] + .1, B[2] + .3));
+  if (lt >= B[2] + .06) {
+    const gl = Math.exp(-(lt - B[2] - .06) * 6) + (Math.floor(lt * 30) % 9 === 0 ? .5 : 0);
+    const r = mulberry(frame * 7 + 3);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    txt('ILLEGAL', X - 8 * gl, IY, rgba('#00E5FF', .55 * Math.min(1, gl)));
+    txt('ILLEGAL', X + 8 * gl, IY, rgba('#FF2D55', .55 * Math.min(1, gl)));
+    ctx.restore();
+    if (gl > .15) { // sliced
+      for (let k = 0; k < 6; k++) {
+        const y0 = IY - s3 * .8 + k * s3 * .15, dx = (r() - .5) * 40 * gl;
+        ctx.save(); ctx.beginPath(); ctx.rect(X - 60, y0, iw + 120, s3 * .15); ctx.clip(); txt('ILLEGAL', X + dx, IY, C.red); ctx.restore();
+      }
+    } else txt('ILLEGAL', X, IY, C.red);
+  }
+  if (barIn > 0 && barOut < 1) { ctx.fillStyle = C.red; ctx.fillRect(X - 12 + (iw + 24) * barOut, IY - s3 * .8, (iw + 24) * (barIn - barOut), s3 * .9); }
+  // tiny warning chip
+  const wp = eOutBack(prog(lt, B[2] + .2, B[2] + .45), 2);
+  if (wp > 0) {
+    font('700 20px Neon'); const cw = ctx.measureText('⚠ NOT A DRILL').width + 28;
+    ctx.save(); ctx.translate(X + iw - cw + 10, IY - s3 * .86 - 20); ctx.scale(wp, wp); ctx.rotate(-.06);
+    ctx.fillStyle = rgba(C.red, .15); ctx.strokeStyle = C.red; ctx.lineWidth = 2; rrect(0, -18, cw, 38, 19); ctx.fill(); ctx.stroke();
+    txt('⚠ NOT A DRILL', 14, 1, C.red, 'left', 'middle'); ctx.restore();
+  }
+  // TO BE [FREE]
+  const FY = IY + 150;
+  font(`900 ${s1 * 1.05}px Mona`);
+  riseChars('TO BE', X, FY, s1 * 1.05, B[3] - .04, lt, C.fg, .02);
+  const tbw = ctx.measureText('TO BE ').width;
+  const fp = eOutBack(prog(lt, B[3] + .02, B[3] + .3), 1.8);
+  if (fp > 0) {
+    const fw = ctx.measureText('FREE').width;
+    const bx = X + tbw, bw = fw + 50, bh = s1 * 1.15, byy = FY - bh * .82;
+    const press = Math.exp(-Math.max(0, lt - (B[3] + .5)) * 14) * (lt > B[3] + .5 ? 1 : 0);
+    ctx.save(); ctx.translate(bx + bw / 2, byy + bh / 2); ctx.scale(fp * (1 - press * .06), fp * (1 - press * .06)); ctx.translate(-bx - bw / 2, -byy - bh / 2);
+    ctx.shadowColor = C.green; ctx.shadowBlur = 40 + pulseAt(t) * 40;
+    ctx.fillStyle = C.greenBtn; rrect(bx, byy, bw, bh, 18); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = C.green; ctx.lineWidth = 3; ctx.stroke();
+    txt('FREE', bx + 25, FY, '#fff');
+    ctx.restore();
+    // click ripple
+    if (lt > B[3] + .5) { const a = prog(lt, B[3] + .5, B[3] + .95); ctx.strokeStyle = rgba(C.green, 1 - a); ctx.lineWidth = 3; rrect(bx - a * 40, byy - a * 40, bw + a * 80, bh + a * 80, 18 + a * 40); ctx.stroke(); }
+    const cp = eInOutCubic(prog(lt, B[3] + .15, B[3] + .48));
+    cursor(lerp(W + 40, bx + bw * .7, cp), lerp(H + 40, byy + bh * .62, cp), press, cp);
+  }
+}
+
+// diff-stripe transition (title → repos)
+const DIFF_SNIPS = ['+ import { everything } from "open-source"', '- const price = 49.99', '+ const price = 0', '- // paywall goes here', '+ license: MIT',
+  '+ git clone --depth=1', '- subscription.renew()', '+ stars++', '+ export default free', '- trial_days = 7'];
+function diffWipe(t, t0, t1) {
+  const p = prog(t, t0, t1); if (p <= 0 || p >= 1) return;
+  const n = 18, h = H / n;
+  for (let i = 0; i < n; i++) {
+    const d = ((i * 7) % 5) * .05 + (i % 2) * .03;
+    const pin = eInOutCubic(clamp((p - d) / .5)), pout = eInOutCubic(clamp((p - .5 - d) / .45));
+    const add = (i * 3) % 4 !== 1;
+    const x0 = lerp(-W, 0, pin) + lerp(0, W, pout);
+    const y = i * h;
+    ctx.fillStyle = add ? '#0B2416' : '#2A1114'; ctx.fillRect(x0, y, W, h + 1);
+    ctx.fillStyle = add ? C.green : C.red; ctx.fillRect(x0 + W - 6, y, 6, h + 1); ctx.fillRect(x0, y, 4, h + 1);
+    font('600 24px Neon');
+    txt(String(100 + i), x0 + 28, y + h / 2 + 1, C.faint, 'left', 'middle');
+    txt(DIFF_SNIPS[i % DIFF_SNIPS.length], x0 + 110, y + h / 2 + 1, add ? C.green : C.red, 'left', 'middle');
+  }
+}
+
+// ================= SCENE C: the 10 repos =================
+const RAIL_X = 150, RAIL_Y0 = 186, RAIL_DY = 79;
+function rail(t, cur, lt) {
+  const enter = i => eOutBack(prog(t, T_REPO + i * .03, T_REPO + .3 + i * .03), 1.6);
+  const ny = i => RAIL_Y0 + i * RAIL_DY;
+  // base line + progress fill
+  ctx.fillStyle = C.border; ctx.fillRect(RAIL_X - 1, ny(0), 2, (ny(9) - ny(0)) * eOutCubic(prog(t, T_REPO, T_REPO + .4)));
+  const fillTo = ny(cur) + (ny(Math.min(cur + 1, 9)) - ny(cur)) * eInOutCubic(prog(lt, .55, .95)) * (cur < 9 ? 1 : 0);
+  const fg = ctx.createLinearGradient(0, ny(0), 0, fillTo); fg.addColorStop(0, C.g2); fg.addColorStop(1, C.green);
+  ctx.fillStyle = fg; ctx.fillRect(RAIL_X - 2, ny(0), 4, fillTo - ny(0));
+  // purple merge branch from current node into the next
+  if (cur < 9) {
+    const bp = eInOutCubic(prog(lt, .12, .8)), y0 = ny(cur), y1 = ny(cur + 1);
+    ctx.strokeStyle = C.purple; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
+    for (let k = 0; k <= 40 * bp; k++) {
+      const u = k / 40, x = RAIL_X + Math.sin(u * Math.PI) * 30, y = lerp(y0, y1, u);
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+  for (let i = 0; i < 10; i++) {
+    const e = enter(i); if (e <= 0) continue;
+    const y = ny(i), r = REPOS[i];
+    const isCur = i === cur, done = i < cur;
+    ctx.save(); ctx.translate(RAIL_X, y); ctx.scale(e, e);
+    if (isCur) {
+      const pp = pulseAt(t, 6);
+      ctx.fillStyle = rgba(r.acc, .25); ctx.beginPath(); ctx.arc(0, 0, 22 + pp * 8, 0, 7); ctx.fill();
+      ctx.strokeStyle = r.acc; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 13, 0, 7); ctx.stroke();
+      ctx.fillStyle = r.acc; ctx.beginPath(); ctx.arc(0, 0, 7, 0, 7); ctx.fill();
+    } else {
+      ctx.fillStyle = done ? C.green : '#000'; ctx.strokeStyle = done ? C.green : C.faint; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(0, 0, 8, 0, 7); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+    // labels
+    const la = eOutCubic(prog(t, T_REPO + .1 + i * .03, T_REPO + .4 + i * .03));
+    if (la <= 0) continue;
+    const off = isCur ? 14 * eOutExpo(prog(lt, 0, .25)) : 0;
+    if (isCur) { const hw = eOutExpo(prog(lt, 0, .3)); const hg = ctx.createLinearGradient(RAIL_X + 26, 0, RAIL_X + 400, 0); hg.addColorStop(0, rgba(r.acc, .22)); hg.addColorStop(1, rgba(r.acc, 0)); ctx.fillStyle = hg; ctx.fillRect(RAIL_X + 26, y - 30, 380 * hw, 60); }
+    ctx.globalAlpha = la;
+    font(`${isCur ? 800 : 600} 25px Mona`);
+    txt(r.name, RAIL_X + 36 + off, y - 2, isCur ? C.fg : done ? C.text : C.faint, 'left', 'alphabetic');
+    font('400 16px Neon');
+    txt(`${r.hash}  ${isCur ? '← HEAD' : done ? '✓ starred' : ''}`, RAIL_X + 36 + off, y + 20, isCur ? r.acc : done ? C.g3 : C.border);
+    ctx.globalAlpha = 1;
+  }
+}
+function sceneRepos(t, frame) {
+  const cur = clamp(Math.floor((t - T_REPO) / SLOT), 0, 9);
+  const ts = T_REPO + cur * SLOT, lt = t - ts;
+  const r = REPOS[cur];
+  background(t, 1250, 560, 820, r.acc, .16);
+  // HUD
+  ctx.globalAlpha = eOutCubic(prog(t, T_REPO, T_REPO + .3));
+  font('600 20px Neon');
+  const hud = `⎇ main   ·   ${String(cur + 1).padStart(2, '0')}/10 repos   ·   total cost: $0.00`;
+  txt(hud, W - 64, 64, C.muted, 'right', 'middle');
+  ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(W - 74 - ctx.measureText(hud).width - 18, 64, 6 + pulseAt(t) * 3, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = rgba(C.fg, .1); ctx.fillRect(580, 150, 1.5, 780 * eOutExpo(prog(t, T_REPO, T_REPO + .5)));
+  rail(t, cur, lt);
+  // contribution squares progress (bottom-left)
+  for (let i = 0; i < 10; i++) {
+    const on = i < cur || (i === cur && lt > BEAT);
+    const pop = i === cur ? eOutBack(prog(lt, BEAT, BEAT + .25), 3) : 1;
+    ctx.save(); ctx.translate(112 + i * 30, 1000); const s = on ? lerp(1, 1.3, Math.sin(Math.PI * clamp(pop)) * .6) : 1; ctx.scale(s, s);
+    ctx.fillStyle = on ? GREENS[2 + (i % 3)] : C.g0; rrect(-11, -11, 22, 22, 4); ctx.fill(); ctx.restore();
+  }
+  font('400 20px Neon');
+  const nC = cur + (lt > BEAT ? 1 : 0);
+  txt(`${nC} contribution${nC === 1 ? '' : 's'} in the last 15 seconds`, 112 + 10 * 30, 1000, C.muted, 'left', 'middle');
+
+  // --- stage ---
+  const SX = 680, SW = 1150;
+  const v = cur % 3;
+  const pin = k => eOutExpo(prog(lt, .02 + k * .03, .34 + k * .03));
+  const pout = k => cur === 9 ? 0 : eInExpo(prog(lt, .8 + k * .012, .93 + k * .012));
+  function el(k, draw) {
+    const a = pin(k), b = pout(k); if (a <= 0 || b >= 1) return;
+    ctx.save(); ctx.globalAlpha = a * (1 - b);
+    if (v === 0) ctx.translate((1 - a) * 220 - b * 260, 0);
+    else if (v === 1) ctx.translate(0, (1 - a) * 120 - b * 140);
+    else { const s = lerp(1.12, 1, a) * lerp(1, .9, b); ctx.translate(SX + SW / 2, 540); ctx.scale(s, s); ctx.translate(-SX - SW / 2, -540); }
+    draw(a); ctx.restore();
+  }
+  // giant ghost index
+  el(0, a => {
+    font('900 600px Hubot'); ctx.strokeStyle = rgba(r.acc, .13); ctx.lineWidth = 3; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.strokeText(String(cur + 1).padStart(2, '0'), 1880 + lt * -40, 1010);
+  });
+  // tag line
+  el(0, () => {
+    font('700 24px Neon'); txt(`REPO ${String(cur + 1).padStart(2, '0')} / 10`, SX, 232, r.acc, 'left', 'middle');
+    const tw = ctx.measureText(`REPO ${String(cur + 1).padStart(2, '0')} / 10`).width;
+    font('600 19px Mona'); const pw = ctx.measureText('Public').width + 26;
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1.5; rrect(SX + tw + 22, 216, pw, 32, 16); ctx.stroke();
+    txt('Public', SX + tw + 35, 233, C.muted, 'left', 'middle');
+    font('600 19px Mona'); const fw2 = ctx.measureText('100% free').width + 26;
+    ctx.fillStyle = rgba(C.green, .14); ctx.strokeStyle = rgba(C.green, .6); rrect(SX + tw + 34 + pw, 216, fw2, 32, 16); ctx.fill(); ctx.stroke();
+    txt('100% free', SX + tw + 47 + pw, 233, C.green, 'left', 'middle');
+  });
+  // owner / repo path (typed)
+  el(1, () => {
+    iconRepo(SX, 300, 34, C.muted);
+    font('400 34px Neon'); const o = r.owner + ' / ';
+    const tp = prog(lt, .04, .3), full = o + r.repo, sh = typed(full, tp);
+    txt(sh.slice(0, o.length), SX + 52, 330, C.blue);
+    if (sh.length > o.length) { const ow = ctx.measureText(o).width; font('700 34px Neon'); txt(sh.slice(o.length), SX + 52 + ow, 330, C.blue); }
+  });
+  // big name, per-char rise
+  const ns = fit(r.name, 900, 'Mona', 170, SW);
+  el(2, () => {
+    font(`900 ${ns}px Mona`);
+    if (pin(2) > .02) { ctx.save(); ctx.shadowColor = rgba(r.acc, .55); ctx.shadowBlur = 50 * Math.exp(-lt * 3); riseChars(r.name, SX - 6, 330 + 26 + ns * .86, ns, .03, lt, C.fg, .02, .3); ctx.restore(); }
+  });
+  // accent underline
+  const NY = 330 + 26 + ns * .86;
+  el(3, a => { ctx.fillStyle = r.acc; ctx.fillRect(SX, NY + 30, 130 * eOutExpo(prog(lt, .12, .45)), 6); });
+  // description, word-by-word
+  el(3, () => {
+    font('500 42px Mona'); const lines = wrap(r.desc, SW - 40);
+    let wi = 0; const total = r.desc.split(' ').length;
+    lines.forEach((ln, li) => {
+      let x = SX; const y = NY + 104 + li * 58;
+      for (const w of ln.split(' ')) {
+        const p = eOutCubic(prog(lt, .1 + wi / total * .26, .24 + wi / total * .26)); wi++;
+        if (p > 0) { ctx.globalAlpha *= 1; ctx.save(); ctx.globalAlpha *= p; txt(w, x, y + (1 - p) * 18, C.text); ctx.restore(); }
+        x += ctx.measureText(w + ' ').width;
+      }
+    });
+  });
+  // buttons: Star (clicked on beat 2), Fork, link
+  const lines = (() => { font('500 42px Mona'); return wrap(r.desc, SW - 40).length; })();
+  const BY = NY + 104 + lines * 58 + 34;
+  const click = BEAT, starred = lt >= click;
+  el(4, () => {
+    const pop = eOutBack(prog(lt, click, click + .22), 3);
+    const bw = 196, bh = 60;
+    ctx.save(); ctx.translate(SX + bw / 2, BY + bh / 2); const s = starred ? lerp(.9, 1, pop) : 1; ctx.scale(s, s); ctx.translate(-SX - bw / 2, -BY - bh / 2);
+    ctx.fillStyle = starred ? rgba(C.yellow, .12) : C.btn; ctx.strokeStyle = starred ? rgba(C.yellow, .8) : C.border; ctx.lineWidth = 2;
+    rrect(SX, BY, bw, bh, 10); ctx.fill(); ctx.stroke();
+    starPath(SX + 38, BY + bh / 2, 15 * (starred ? lerp(1.6, 1, pop) : 1));
+    if (starred) { ctx.fillStyle = C.yellow; ctx.fill(); } else { ctx.strokeStyle = C.muted; ctx.lineWidth = 2; ctx.stroke(); }
+    font('700 26px Mona'); txt(starred ? 'Starred' : 'Star', SX + 66, BY + bh / 2 + 1, starred ? C.yellow : C.fg, 'left', 'middle');
+    ctx.restore();
+    if (starred) { // burst
+      const bp = prog(lt, click, click + .45);
+      for (let k = 0; k < 12; k++) {
+        const ang = k / 12 * Math.PI * 2 + cur, d = 20 + eOutCubic(bp) * 90;
+        ctx.save(); ctx.globalAlpha *= 1 - bp; starPath(SX + 38 + Math.cos(ang) * d, BY + bh / 2 + Math.sin(ang) * d, 7 * (1 - bp * .5));
+        ctx.fillStyle = k % 2 ? C.yellow : r.acc; ctx.fill(); ctx.restore();
+      }
+    }
+    // Fork
+    const fx = SX + bw + 18;
+    ctx.fillStyle = C.btn; ctx.strokeStyle = C.border; ctx.lineWidth = 2; rrect(fx, BY, 170, bh, 10); ctx.fill(); ctx.stroke();
+    iconFork(fx + 22, BY + 16, 28, C.muted);
+    font('700 26px Mona'); txt('Fork', fx + 64, BY + bh / 2 + 1, C.fg, 'left', 'middle');
+    // link
+    const lx = fx + 170 + 36;
+    font('400 26px Neon'); const link = `github.com/${r.owner}/${r.repo}`;
+    const lw = ctx.measureText(link).width, maxL = SX + SW - lx;
+    if (lw > maxL) font(`400 ${Math.floor(26 * maxL / lw)}px Neon`);
+    txt(link, lx, BY + bh / 2 + 1, C.muted, 'left', 'middle');
+    ctx.fillStyle = r.acc; ctx.fillRect(lx, BY + bh / 2 + 22, Math.min(lw, maxL) * eOutExpo(prog(lt, .3, .6)), 2);
+  });
+  // cursor glides to Star and clicks
+  {
+    const a = eInOutCubic(prog(lt, .12, click - .02)), out = eInCubic(prog(lt, click + .2, .9));
+    const press = lt >= click ? Math.exp(-(lt - click) * 16) : 0;
+    const fromX = [1900, 1400, 1960][v], fromY = [1120, 1140, 700][v];
+    cursor(lerp(fromX, SX + 120, a) + out * 500, lerp(fromY, BY + 34, a) + out * 260, press, (1 - out) * prog(lt, .1, .16) * (cur === 9 && lt > .9 ? 0 : 1));
+  }
+  // flash line on each repo change
+  const fl = prog(lt, 0, .22);
+  if (fl < 1) { const x = lerp(560, W + 100, eOutCubic(fl)); const g = ctx.createLinearGradient(x - 200, 0, x, 0); g.addColorStop(0, rgba(r.acc, 0)); g.addColorStop(1, rgba(r.acc, .35 * (1 - fl))); ctx.fillStyle = g; ctx.fillRect(x - 200, 0, 200, H); ctx.fillStyle = rgba('#fff', .7 * (1 - fl)); ctx.fillRect(x, 0, 2, H); }
+}
+
+// ================= SCENE D: outro =================
+function sceneOutro(t, frame) {
+  const lt = t - T_OUT;
+  background(t, W / 2, 520, 980, C.green, .2);
+  // headline
+  const HY = 182;
+  font('900 74px Mona');
+  const parts = [['ALL 10.', C.fg], [' FREE.', C.green], [' OPEN SOURCE.', C.fg]];
+  const tw = parts.reduce((s, [p]) => s + ctx.measureText(p).width, 0);
+  let hx = W / 2 - tw / 2;
+  parts.forEach(([p, c], i) => { riseChars(p, hx, HY, 74, .04 + i * .1, lt, c, .015, .3); hx += ctx.measureText(p).width; });
+  // 5×2 grid of repo cards
+  const cw = 322, ch = 214, gap = 22, ox = (W - (5 * cw + 4 * gap)) / 2, oy = 238;
+  REPOS.forEach((r, j) => {
+    const c = j % 5, row = Math.floor(j / 5);
+    const x = ox + c * (cw + gap), y = oy + row * (ch + gap);
+    const d = (c + row * 2) * .04;
+    const p = eOutBack(prog(lt, .02 + d, .36 + d), 1.5);
+    if (p <= 0) return;
+    ctx.save(); ctx.translate(x + cw / 2, y + ch / 2); ctx.scale(p, p); ctx.rotate((1 - clamp(p)) * (j % 2 ? .2 : -.2)); ctx.translate(-cw / 2, -ch / 2);
+    const lit = Math.floor((lt - .5) * 12) % 10 === j && lt > .5;
+    ctx.fillStyle = lit ? '#12301E' : C.canvas; ctx.strokeStyle = lit ? C.green : C.border; ctx.lineWidth = 1.5;
+    rrect(0, 0, cw, ch, 12); ctx.fill(); ctx.stroke();
+    ctx.save(); rrect(0, 0, cw, ch, 12); ctx.clip(); ctx.fillStyle = r.acc; ctx.fillRect(0, 0, cw, 5); ctx.restore();
+    font('700 18px Neon'); txt(String(j + 1).padStart(2, '0'), 20, 36, r.acc);
+    starPath(cw - 30, 30, 11); ctx.fillStyle = C.yellow; ctx.fill();
+    iconRepo(20, 50, 18, C.muted);
+    font('400 16px Neon'); let ow = r.owner + '/'; txt(ow.length > 26 ? ow.slice(0, 25) + '…' : ow, 46, 64, C.blue);
+    const ns = fit(r.name, 800, 'Mona', 32, cw - 40); font(`800 ${ns}px Mona`); txt(r.name, 20, 106, C.fg);
+    font('500 16px Mona'); const ls = wrap(r.desc, cw - 40).slice(0, 4);
+    ls.forEach((ln, k) => txt(k === 3 && wrap(r.desc, cw - 40).length > 4 ? ln + '…' : ln, 20, 136 + k * 20, C.muted));
+    ctx.restore();
+  });
+  // CTA button + cursor click
+  const by = 790, bw = 520, bh = 86, bx = W / 2 - bw / 2;
+  const bp = eOutBack(prog(lt, .55, .85), 1.8);
+  const clickT = 1.12, press = lt > clickT ? Math.exp(-(lt - clickT) * 14) : 0;
+  if (bp > 0) {
+    ctx.save(); ctx.translate(W / 2, by + bh / 2); ctx.scale(bp * (1 - press * .05), bp * (1 - press * .05)); ctx.translate(-W / 2, -by - bh / 2);
+    ctx.shadowColor = C.green; ctx.shadowBlur = 30 + pulseAt(t) * 40 + (lt > clickT ? 40 : 0);
+    ctx.fillStyle = C.greenBtn; rrect(bx, by, bw, bh, 14); ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = C.green; ctx.lineWidth = 2.5; ctx.stroke();
+    starPath(bx + 62, by + bh / 2, 20); ctx.fillStyle = lt > clickT ? C.yellow : '#fff'; ctx.fill();
+    font('800 38px Mona'); txt('Star them all', bx + 100, by + bh / 2 + 2, '#fff', 'left', 'middle');
+    font('600 22px Neon'); const sw = 120; ctx.fillStyle = 'rgba(0,0,0,0.25)'; rrect(bx + bw - sw - 22, by + 22, sw, 42, 21); ctx.fill();
+    txt(lt > clickT ? '10/10 ★' : '0/10', bx + bw - sw / 2 - 22, by + bh / 2 + 1, '#fff', 'center', 'middle');
+    ctx.restore();
+    if (lt > clickT) { // contribution-square confetti
+      const cp = prog(lt, clickT, clickT + .75);
+      const rr = mulberry(77);
+      for (let k = 0; k < 46; k++) {
+        const ang = rr() * Math.PI * 2, sp = 200 + rr() * 520, s = 8 + rr() * 14;
+        const x = W / 2 + Math.cos(ang) * sp * eOutCubic(cp), y = by + bh / 2 + Math.sin(ang) * sp * eOutCubic(cp) + cp * cp * 160;
+        ctx.save(); ctx.globalAlpha = 1 - cp; ctx.translate(x, y); ctx.rotate(cp * 6 * (rr() - .5)); ctx.fillStyle = GREENS[1 + (k % 4)]; rrect(-s / 2, -s / 2, s, s, 3); ctx.fill(); ctx.restore();
+      }
+      const ra = prog(lt, clickT, clickT + .5); ctx.strokeStyle = rgba(C.green, 1 - ra); ctx.lineWidth = 3; rrect(bx - ra * 50, by - ra * 50, bw + ra * 100, bh + ra * 100, 14 + ra * 50); ctx.stroke();
+    }
+    const cp = eInOutCubic(prog(lt, .7, clickT - .02));
+    cursor(lerp(W * .8, bx + bw - 70, cp), lerp(H + 40, by + bh * .72, cp), press, cp);
+  }
+  font('400 24px Neon');
+  const tl = '$ git clone --save-this-post';
+  const tp = prog(lt, 1.15, 1.6);
+  ctx.globalAlpha = eOutCubic(prog(lt, 1.1, 1.3));
+  const tlw = ctx.measureText(tl).width;
+  txt(typed(tl, tp), W / 2 - tlw / 2, 940, C.muted);
+  if (tp >= 1 && Math.floor(t * 5) % 2) { ctx.fillStyle = C.green; ctx.fillRect(W / 2 + tlw / 2 + 6, 920, 13, 26); }
+  ctx.globalAlpha = 1;
+  // impact flash
+  const f = lt >= 0 ? Math.exp(-lt * 10) : 0;
+  if (f > .01) { ctx.fillStyle = rgba(C.g4, .5 * f); ctx.fillRect(0, 0, W, H); }
+}
+
+// ================= master render =================
+window.render = function (t, frame = 0) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0;
+  let sx = 0, sy = 0;
+  for (const [it, amp] of [[T_DROP, 18], [T_OUT, 14]]) if (t >= it) { const a = amp * Math.exp(-(t - it) * 7); sx += Math.sin(t * 91) * a; sy += Math.cos(t * 77) * a; }
+  const z = 1 + pulseAt(t, 9) * .008;
+  ctx.setTransform(z, 0, 0, z, W / 2 * (1 - z) + sx, H / 2 * (1 - z) + sy);
+
+  if (t < T_DROP) sceneIntro(t);
+  else if (t < T_REPO) sceneTitle(t, frame);
+  else if (t < T_OUT) sceneRepos(t, frame);
+  else sceneOutro(t, frame);
+
+  if (t >= T_DROP && t < T_DROP + .35) { ctx.fillStyle = rgba(C.g4, .7 * Math.exp(-(t - T_DROP) * 12)); ctx.fillRect(-60, -60, W + 120, H + 120); }
+  diffWipe(t, T_REPO - .36, T_REPO + .34);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // digital glitch on the hard cuts / repo changes
+  let g = 0;
+  for (const k of [T_DROP, T_OUT]) if (t >= k) g = Math.max(g, Math.exp(-(t - k) * 14));
+  if (t >= T_REPO + SLOT && t < T_OUT) { const lt = (t - T_REPO) % SLOT; g = Math.max(g, .6 * Math.exp(-lt * 26)); }
+  if (t > T_DROP + BEAT * 2 + .05 && t < T_DROP + BEAT * 2 + .2) g = Math.max(g, .5);
+  sliceGlitch(g, frame * 13 + 1);
+  overlays(t, frame);
+  watermark();
+};
+
+window.ready = (async () => {
+  const fams = ['500 50px Mona', '600 50px Mona', '700 50px Mona', '800 50px Mona', '900 50px Mona', 'italic 800 50px Mona', '800 50px Hubot', '900 50px Hubot', '400 50px Neon', '600 50px Neon', '700 50px Neon'];
+  await Promise.all(fams.map(f => document.fonts.load(f)));
+  await document.fonts.ready;
+  return true;
+})();
+if (!navigator.webdriver) {
+  (async () => { await window.ready; const t0 = performance.now(); const loop = () => { const t = ((performance.now() - t0) / 1000) % DUR; render(t, Math.floor(t * 60)); requestAnimationFrame(loop); }; loop(); })();
+}
+</script>
+</body>
+</html>
