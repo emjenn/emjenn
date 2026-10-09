@@ -29,9 +29,10 @@ const rgba = (hex, a) => {
 // ---------- timing (music: 128 BPM) ----------
 const BEAT = 60 / 128, BAR = BEAT * 4, SLOT = BEAT * 2;
 const T_DROP = BAR, T_LIST = BAR * 2, T_OUT = BAR * 7, DUR = 15;
+// beat pulses follow the half-time phonk drums in music.py: kick on 16ths 0/6/10, snare on 8
 const KICKS = [];
-for (let b = 1; b < 7; b++) for (let k = 0; k < 4; k++) KICKS.push(b * BAR + k * BEAT);
-KICKS.push(T_OUT, T_OUT + BEAT * 2);
+for (let b = 1; b < 7; b++) for (const st of [0, 6, 8, 10]) if (!(b === 6 && st === 6)) KICKS.push(b * BAR + st * BEAT / 4);
+KICKS.push(T_OUT);
 const slotStart = i => T_LIST + i * SLOT;
 
 // ---------- helpers ----------

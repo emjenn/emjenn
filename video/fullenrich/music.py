@@ -1,15 +1,21 @@
-"""Original 15s electro / future-house track, 128 BPM, D minor (FullEnrich cut). Fully synthesized (no samples).
+"""Original 15s dark phonk / half-time trap track, 128 BPM (felt at 64), C# Phrygian.
+Fully synthesized (no samples). Deliberately unlike the house tracks used in the other videos:
+distorted 808 slides, phonk cowbell lead, half-time snare, triplet hat rolls, tape stop ending.
 
 Timeline (1 bar = 1.875s, 8 bars = 15s):
-  bar 0      intro: tape-start pad, riser, accelerating snare roll
-  bar 1      DROP: impact, four-on-the-floor, 808 sub + growl bass, clap
-  bars 2-4   6 prompts, one every 2 beats: chord stab + climbing bell + whoosh
-  bars 5-6   3 proof stats on a syncopated 11/16 grid, glitch stutters
-  bar 7      outro: final chord hit, half-time kick, downlifter, reverb tail
+  bar 0      intro: dark detuned choir pad, vinyl crackle, filtered cowbell teaser, reverse swell
+  bar 1      DROP: 808 + kick pattern, half-time snare on beat 3, cowbell riff opens up
+  bars 2-4   6 prompts: orchestral stab on every prompt cut (kick + snare positions)
+  bars 5-6   3 proof stats: stabs on an 11/16 grid, beat chops + stutters
+  bar 7      outro: final stab + long 808 slide, tape stop into the reverb tail
+
+Drum grid (16th steps per bar) — mirrored in motion.html for the beat pulses:
+  kick  0, 6, 10      snare 8
 """
 import numpy as np
 import wave
 import sys
+
 
 SR = 44100
 BPM = 128
@@ -132,179 +138,208 @@ def downlifter(d=1.6):
     return onepole_lp(n, cut) * np.exp(-t * 1.8)
 
 
-# ---------- tonal ----------
-def supersaw(notes, d, cutoff=2400, voices=5, detune=0.12, attack=0.01, release=0.15):
-    t = tvec(d)
-    sig = np.zeros(len(t))
-    for n in notes:
-        for v in range(voices):
-            cents = (v - (voices - 1) / 2) * detune * 2 / (voices - 1) * 100 / 10
-            f = midi(n) * 2 ** (cents / 1200)
-            sig += saw(f, t, phase=rng.random())
-    sig /= voices * len(notes)
-    env = np.minimum(t / attack, 1) * np.clip((d - t) / release, 0, 1)
-    return onepole_lp(sig, cutoff) * env
 
 
-def pluck(note, d=0.22, bright=5000):
-    t = tvec(d)
-    sig = saw(midi(note), t) * 0.6 + np.sign(np.sin(2 * np.pi * midi(note) * 1.005 * t)) * 0.3
-    cut = 300 + bright * np.exp(-t * 18)
-    return onepole_lp(sig, cut) * np.exp(-t * 9)
-
-
-def bass(note, d):
+# ---------- phonk voices ----------
+def cowbell(note, d=0.16):
     t = tvec(d)
     f = midi(note)
-    sig = saw(f, t) * 0.7 + np.sin(2 * np.pi * f / 2 * t) * 0.6
-    sig = onepole_lp(sig, 380 + 900 * np.exp(-t * 10))
-    env = np.minimum(t / 0.005, 1) * np.clip((d - t) / 0.03, 0, 1)
-    return np.tanh(sig * 1.6 * env)
+    sig = np.sign(np.sin(2 * np.pi * f * t)) + np.sign(np.sin(2 * np.pi * f * 1.483 * t)) * 0.8
+    sig = onepole_lp(hp(sig, 700), 5200)
+    return sig * np.exp(-t * 16) * 0.6
 
 
-
-
-def bell(note, d=0.9):
-    t = tvec(d)
-    f = midi(note)
-    mod = np.sin(2 * np.pi * f * 3.5 * t) * 2.2 * np.exp(-t * 6)
-    return np.sin(2 * np.pi * f * t + mod) * np.exp(-t * 4.5)
-
-
-def sub808(note, d, glide_from=None):
+def b808(note, d, glide_from=None, drive=3.0):
     t = tvec(d)
     f = np.full(len(t), midi(note))
     if glide_from is not None:
-        f = midi(note) + (midi(glide_from) - midi(note)) * np.exp(-t * 25)
-    sig = np.sin(2 * np.pi * np.cumsum(f) / SR)
-    env = np.minimum(t / 0.004, 1) * np.clip((d - t) / 0.04, 0, 1) * (0.55 + 0.45 * np.exp(-t * 3))
-    return np.tanh(sig * 2.2) * env
+        f = midi(note) + (midi(glide_from) - midi(note)) * np.exp(-t * 18)
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    click = np.sin(2 * np.pi * np.cumsum(f * (1 + 2 * np.exp(-t * 60))) / SR) * np.exp(-t * 40) * 0.5
+    env = np.minimum(t / 0.003, 1) * np.clip((d - t) / 0.05, 0, 1) * (0.45 + 0.55 * np.exp(-t * 1.6))
+    return np.tanh((np.sin(ph) + click) * drive) * env / np.tanh(drive)
 
 
-def growl(note, d):
+def snare(d=0.35):
     t = tvec(d)
-    f = midi(note)
-    sig = saw(f, t) + saw(f * 1.008, t, 0.3) + 0.5 * np.sign(np.sin(2 * np.pi * f * 0.5 * t))
-    wob = 500 + 2200 * (0.5 + 0.5 * np.sin(2 * np.pi * (1 / BEAT) * 2 * t - np.pi / 2))
-    sig = onepole_lp(onepole_lp(sig, wob), wob)
-    env = np.minimum(t / 0.004, 1) * np.clip((d - t) / 0.03, 0, 1)
-    return np.tanh(sig * 1.4 * env) * 0.7
+    n = rng.standard_normal(len(t))
+    body = np.sin(2 * np.pi * (175 + 60 * np.exp(-t * 40)) * t) * np.exp(-t * 18)
+    noise = hp(onepole_lp(n, 7000), 1200) * np.exp(-t * 11)
+    return np.tanh((body * 0.9 + noise * 0.9) * 1.6) * 0.8
 
 
-DM = (38, [62, 65, 69, 72])
-BB = (34, [62, 65, 70, 74])
-F_ = (41, [60, 65, 69, 72])
-C_ = (36, [60, 64, 67, 72])
-prog = [DM, DM, BB, F_, C_, BB, F_, DM]
+def choir(notes, d, cutoff=1500):
+    t = tvec(d)
+    sig = np.zeros(len(t))
+    for n in notes:
+        for v in range(4):
+            vib = 1 + 0.004 * np.sin(2 * np.pi * (4.5 + v * 0.3) * t + v)
+            sig += saw(midi(n) * vib * 2 ** ((v - 1.5) * 0.12 / 12), t, rng.random())
+    sig = onepole_lp(onepole_lp(sig, cutoff), cutoff * 1.4) / (4 * len(notes))
+    env = np.minimum(t / 0.5, 1) * np.clip((d - t) / 0.4, 0, 1)
+    return sig * env
 
-kick_s, clap_s = kick(), clap()
 
-# ---- intro (bar 0): tape-start pad + riser + snare roll ----
-t0 = tvec(BAR + 0.2)
-pad = supersaw([n - 12 for n in prog[0][1]], BAR + 0.2, cutoff=700, attack=0.6, release=0.3)
-pad = onepole_lp(pad, 400 + 3200 * (t0 / BAR) ** 2)
-add(pad, 0, 0.6)
-add(riser(BAR, 150, 9000), 0, 0.55)
-for i in range(4):
-    add(kick_s, i * BEAT, 0.35 * (i + 1) / 4)
-roll = [0.0]
-while roll[-1] < BAR - 0.02:  # accelerating roll
-    roll.append(roll[-1] + max(0.035, 0.22 * (1 - roll[-1] / BAR) ** 1.4))
-for k, rt in enumerate(roll[:-1]):
-    add(snare_roll_hit(), rt, 0.04 + 0.22 * (rt / BAR) ** 2, pan=0.15 * (-1) ** k)
+def stab(notes, d=0.5):
+    t = tvec(d)
+    sig = np.zeros(len(t))
+    for n in notes:
+        sig += saw(midi(n), t, rng.random()) + saw(midi(n) * 1.006, t, rng.random())
+    sig = onepole_lp(sig / (2 * len(notes)), 1800 + 5000 * np.exp(-t * 9)) * np.exp(-t * 4)
+    burst = hp(rng.standard_normal(len(t)), 2500) * np.exp(-t * 30) * 0.4
+    low = np.sin(2 * np.pi * midi(notes[0] - 24) * t) * np.exp(-t * 7)
+    return np.tanh((sig * 1.4 + burst + low * 0.6) * 1.3)
 
-# ---- drop: bars 1-6 groove ----
-add(impact(), BAR, 1.0)
-kick_times = []
+
+def crackle(d):
+    n = int(d * SR)
+    x = np.zeros(n)
+    idx = rng.integers(0, n, int(d * 60))
+    x[idx] = rng.standard_normal(len(idx)) * rng.random(len(idx))
+    return onepole_lp(x, 6000) + hp(rng.standard_normal(n), 3000) * 0.004
+
+
+def rev_swell(d=1.2):
+    t = tvec(d)
+    n = rng.standard_normal(len(t))
+    return hp(n, 2000) * (t / d) ** 3
+
+
+# C# Phrygian: C# D E F# G# A B
+CS = 37
+riff = [  # 16 steps of the cowbell riff (midi or None)
+    73, None, 73, 74, None, 73, None, 68, 73, None, 76, None, 74, 73, None, 68,
+]
+riff_b = [
+    73, None, 73, 74, None, 73, None, 68, 76, None, 78, None, 76, 74, None, 73,
+]
+bass_roots = [CS, CS, CS - 4, CS + 1, CS, CS - 4, CS + 1, CS]  # per bar (C#, A, D)
+S16 = BEAT / 4
+kick_s = kick(0.4)
+snare_s = snare()
+
+# ---- intro (bar 0) ----
+add(choir([61, 64, 68, 73], BAR + 0.3, cutoff=900), 0, 0.7)
+add(rev_swell(BAR), 0, 0.35)
+add(riser(BAR, 150, 5000), 0, 0.25)
+for s in range(16):
+    n = riff[s]
+    if n is not None:
+        add(onepole_lp(cowbell(n), 900 + 3000 * s / 16), s * S16, 0.18 + 0.2 * s / 16, pan=0.2)
+for s in (12, 13, 14, 15):
+    add(snare_s[: int(0.12 * SR)], s * S16, 0.15 + 0.08 * (s - 12))
+
+# ---- groove bars 1-6 ----
+add(impact(), BAR, 0.75)
+pulses = []
 for b in range(1, 7):
     bt = b * BAR
-    root, ch = prog[b]
-    for k in range(4):
-        kt = bt + k * BEAT
-        kick_times.append(kt)
-        add(kick_s, kt, 1.0)
-        add(hat(), kt + BEAT / 2, 0.24, pan=0.25)
-        add(hat(open_=True), kt + BEAT / 2, 0.08, pan=-0.25)
-        if k in (1, 3):
-            add(clap_s, kt, 0.5, pan=0.05)
-        # bass: 808 on the beat, growl on offbeats
-        prev = prog[b - 1][0] if k == 0 else None
-        add(sub808(root, BEAT * 0.48, glide_from=prev + 12 if prev else None), kt, 0.55)
-        add(growl(root + 12, BEAT * 0.45), kt + BEAT / 2, 0.30)
+    root = bass_roots[b]
+    chop = b == 6  # last stats bar: half-bar dropout chop
+    for st in (0, 6, 10):
+        if chop and st == 6:
+            continue
+        add(kick_s, bt + st * S16, 0.9)
+        pulses.append(bt + st * S16)
+    # 808 line: follows the kicks, slides on step 10
+    prev = bass_roots[b - 1]
+    add(b808(root, S16 * 6 * 0.95, glide_from=prev if prev != root else None), bt, 0.75)
+    if not chop:
+        add(b808(root, S16 * 4 * 0.95), bt + 6 * S16, 0.65)
+    add(b808(root + 12 if b % 2 else root + 7, S16 * 6 * 0.95, glide_from=root), bt + 10 * S16, 0.6)
+    add(snare_s, bt + 8 * S16, 0.75)
+    pulses.append(bt + 8 * S16)
+    # hats: 16ths with accents, triplet roll at the end of odd bars
     for s in range(16):
-        add(hat(0.03), bt + s * BEAT / 4, 0.05 + 0.035 * (s % 2), pan=-0.35)
-    # offbeat chord stabs
-    for k in range(4):
-        st = supersaw([n + 12 for n in ch], BEAT * 0.42, cutoff=3400 if b >= 2 else 2400, release=0.07)
-        add(st, bt + k * BEAT + BEAT / 2, 0.26, pan=-0.25 if k % 2 else 0.25)
-
-# ---- 6 prompt hits every 2 beats from bar 2, then 3 syncopated stat hits ----
-penta = [62, 65, 67, 69, 72, 74, 77, 79, 81]
-hits = [2 * BAR + i * BEAT * 2 for i in range(6)] + [5 * BAR + j * BEAT * 2.75 for j in range(3)]
-for i, ct in enumerate(hits):
-    root, ch = prog[min(7, int(ct / BAR + 1e-6))]
-    add(supersaw(ch, BEAT * 0.9, cutoff=4200, attack=0.003, release=0.25), ct, 0.38)
-    add(bell(penta[i]), ct, 0.22, pan=0.35 * (-1) ** i)
-    add(bell(penta[i] + 12, 0.5), ct + BEAT, 0.08, pan=-0.35 * (-1) ** i)
-    add(whoosh(0.35), ct - 0.3, 0.22, pan=0.5 * (-1) ** i)
-# data-glitch stutters during the stats
-for j in range(3):
-    st = 5 * BAR + j * BEAT * 2.75 + BEAT * 1.5
-    for q in range(6):
-        add(pluck(86 - q * 2, 0.05, 7000), st + q * BEAT / 8, 0.09, pan=0.6 * (-1) ** q)
-
-# 16th arp across the showcase
-arp_pat = [0, 2, 1, 3, 2, 1, 3, 2]
-for b in range(2, 7):
-    _, ch = prog[b]
-    bt = b * BAR
+        if chop and 4 <= s < 8:
+            continue
+        add(hat(0.04), bt + s * S16, (0.16 if s % 4 == 2 else 0.09) * (0.7 if s % 2 else 1), pan=0.3)
+    if b % 2:
+        for q in range(6):
+            add(hat(0.03), bt + 12 * S16 + q * (4 * S16 / 6), 0.07 + 0.02 * q, pan=-0.3)
+    add(hat(open_=True), bt + 14 * S16, 0.08, pan=-0.2)
+    # cowbell riff
+    rf = riff if b % 2 else riff_b
     for s in range(16):
-        n = ch[arp_pat[s % 8]] + 12 + (12 if s % 8 == 7 else 0)
-        add(pluck(n, 0.18, 4500), bt + s * BEAT / 4, 0.12 + 0.03 * (b - 2) / 4, pan=0.45 * np.sin(s * 0.7))
-add(whoosh(0.7, rev=True), BAR * 0.2, 0.15)
-add(riser(BAR * 0.5, 400, 8000), 6.5 * BAR, 0.3)
+        n = rf[s]
+        if n is None or (chop and 4 <= s < 8):
+            continue
+        add(cowbell(n), bt + s * S16, 0.42, pan=0.15 * (-1) ** s)
+        add(cowbell(n + 12, 0.08), bt + s * S16 + S16 * 0.5, 0.08, pan=-0.4)  # echo
+    # dark pad under it
+    add(choir([61, 64, 68] if root == CS else [57, 61, 64] if root == CS - 4 else [62, 66, 69], BAR, cutoff=1100), bt, 0.22)
+    if chop:  # stutter fill into the outro
+        for q in range(8):
+            add(snare_s[: int(0.05 * SR)], bt + 12 * S16 + q * S16 / 2, 0.12 + 0.05 * q)
+add(crackle(15.0), 0, 0.5)
+
+# ---- prompt + stat hits ----
+hits = [2 * BAR + i * BEAT * 2 for i in range(6)] + [5 * BAR + j * S16 * 11 for j in range(3)]
+stab_ch = [[61, 64, 68], [62, 66, 69], [61, 64, 68], [57, 61, 64], [62, 66, 69], [64, 68, 71],
+           [61, 64, 68], [62, 66, 69], [64, 68, 73]]
+for i, ht in enumerate(hits):
+    add(stab([n + 12 for n in stab_ch[i]]), ht, 0.42, pan=0.25 * (-1) ** i)
+    add(whoosh(0.3), ht - 0.27, 0.18, pan=-0.4 * (-1) ** i)
 
 # ---- outro (bar 7) ----
 ot = 7 * BAR
 add(impact(2.0), ot, 0.8)
 add(kick_s, ot, 1.0)
-add(kick_s, ot + BEAT * 2, 0.8)
-add(supersaw([n + 12 for n in prog[7][1]] + [62 + 12], BAR, cutoff=3200, attack=0.005, release=1.2), ot, 0.6)
-add(sub808(26, BAR * 0.9, glide_from=38), ot, 0.55)
-add(downlifter(BAR), ot, 0.25)
-for i, n in enumerate([86, 84, 81, 79, 77, 74, 72, 69]):
-    add(bell(n, 0.6), ot + BEAT * 1.5 + i * BEAT / 4, 0.1 * (1 - i / 10), pan=0.5 * (-1) ** i)
+add(stab([73, 76, 80, 85], 1.2), ot, 0.5)
+add(b808(CS - 12 + 12, BAR * 0.95, glide_from=CS + 12, drive=4), ot, 0.8)
+add(choir([61, 64, 68, 73], BAR, cutoff=1600), ot, 0.35)
+for i, n in enumerate([85, 80, 76, 73, 68]):
+    add(cowbell(n, 0.25), ot + BEAT * 1.5 + i * S16, 0.25 * (1 - i / 7), pan=0.5 * (-1) ** i)
+pulses.append(ot)
 
-# ---- sidechain ----
+# ---- sidechain (kick + 808 pump) ----
 duck = np.ones(N)
-for kt in kick_times + [ot]:
+for kt in pulses:
     i0 = int(kt * SR)
     t = tvec(BEAT)
-    env = 1 - 0.6 * np.exp(-t * 9)
-    seg = duck[i0 : i0 + len(env)]
-    duck[i0 : i0 + len(env)] = np.minimum(seg, env[: len(seg)])
+    env = 1 - 0.45 * np.exp(-t * 10)
+    seg = duck[i0: i0 + len(env)]
+    duck[i0: i0 + len(env)] = np.minimum(seg, env[: len(seg)])
 
 
-def reverb(x, delays, fb=0.78, mix=0.2):
+def reverb(x, delays, fb=0.75, mix=0.18):
     out = np.zeros_like(x)
     for d in delays:
         D = int(d * SR)
         y = np.copy(x)
         for i in range(D, len(y), D):
-            y[i : i + D] += y[i - D : i][: len(y[i : i + D])] * fb
+            y[i: i + D] += y[i - D: i][: len(y[i: i + D])] * fb
         out += y
-    return onepole_lp(out / len(delays), 5000) * mix
+    return onepole_lp(out / len(delays), 4500) * mix
 
 
 Ld, Rd = L * duck, R * duck
 Lw = Ld + reverb(Ld, (0.0297, 0.0371, 0.0411, 0.0437))
 Rw = Rd + reverb(Rd, (0.0313, 0.0353, 0.0423, 0.0459))
+mx = np.stack([Lw, Rw], 1)
 
-fade = np.clip((DUR - np.arange(N) / SR) / 0.35, 0, 1)
+
+# ---- tape stop over the last 0.9s ----
+def tape_stop(x, t0, dur):
+    i0, n = int(t0 * SR), int(dur * SR)
+    seg = x[i0:]
+    rate = np.clip(1 - np.arange(len(seg)) / n, 0, 1) ** 1.5
+    pos = np.cumsum(rate)
+    pos = pos[pos < len(seg) - 1]
+    out = np.zeros_like(seg)
+    for c in range(seg.shape[1]):
+        out[: len(pos), c] = np.interp(pos, np.arange(len(seg)), seg[:, c])
+    out[: len(pos)] *= np.linspace(1, 0.3, len(pos))[:, None]
+    x[i0:] = out
+    return x
+
+
+mx = tape_stop(mx, 14.05, 0.9)
+fade = np.clip((DUR - np.arange(N) / SR) / 0.25, 0, 1)
 fade_in = np.clip(np.arange(N) / SR / 0.02, 0, 1)
-mx = np.stack([Lw, Rw], 1) * (fade * fade_in)[:, None]
+mx *= (fade * fade_in)[:, None]
 mx /= np.max(np.abs(mx)) + 1e-9
-mx = np.tanh(mx * 1.6) / np.tanh(1.6) * 0.92
+mx = np.tanh(mx * 1.7) / np.tanh(1.7) * 0.92
 
 out = sys.argv[1] if len(sys.argv) > 1 else "music.wav"
 with wave.open(out, "wb") as w:
