@@ -1,0 +1,425 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>16 GitHub Repos</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// =====================================================================
+//  16 GitHub repos that teach more AI/ML than a $1,000 course — 15 s, 16:9, monochrome
+//  Music: 128 BPM. beat = 0.46875 s, bar = 1.875 s
+//  0 ─ hook (2 bars) ─ 3.75 DROP ─ 16 repos × 1 beat ─ 11.25 OUTRO GRID ─ 14.0625 SAVE THIS ─ 15
+//  Every event time is snapped to a 60 fps frame (q) so picture and sound cues share one frame.
+// =====================================================================
+const W = 1920, H = 1080, FPS = 60;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const q = t => Math.round(t * FPS) / FPS;
+const BEAT = 60 / 128, S16 = BEAT / 4, BAR = BEAT * 4;
+const DROP = q(2 * BAR), OUTRO = q(6 * BAR), END_HIT = q(30 * BEAT);
+const T_REPO = k => q(2 * BAR + k * BEAT);
+const STAR = 6;                               // Karpathy: "if you only take one thing from this list"
+const T_STAR = T_REPO(STAR);
+// intro beats
+const T_TYPE = 0.05, T_16 = q(BEAT), T_GH = q(2 * BEAT), T_LINE = q(4 * BEAT), T_COST = q(5 * BEAT), T_STRIKE = q(6 * BEAT), T_BUILD = q(7 * BEAT);
+
+const REPOS = [
+  { n: 'Machine Learning for Beginners', p: 'microsoft/ML-For-Beginners', tag: 'START HERE', d: '12 weeks · 26 lessons · classic ML with Scikit-learn' },
+  { n: '100 Days of ML Code', p: 'Avik-Jain/100-Days-Of-ML-Code', tag: 'DAILY PLAN', d: 'Day by day, from data prep to neural nets' },
+  { n: 'Algorithms in Python', p: 'TheAlgorithms/Python', tag: 'READ THE CODE', d: 'Thousands of algorithms in plain Python' },
+  { n: 'Mathematics for ML', p: 'mml-book/mml-book.github.io', tag: 'MATH', d: 'The free book: linear algebra, calculus, probability' },
+  { n: 'Made With ML', p: 'GokuMohandas/Made-With-ML', tag: 'PRODUCTION', d: 'Design, test and deploy ML that holds up' },
+  { n: 'Deep Learning Paper Implementations', p: 'labmlai/annotated_deep_learning_paper_implementations', tag: 'PAPERS', d: 'Annotated PyTorch next to every line' },
+  { n: 'Neural Networks: Zero to Hero', p: 'karpathy/nn-zero-to-hero', tag: 'TAKE THIS ONE', d: 'From backprop to writing a GPT from scratch' },
+  { n: 'Hands-On Large Language Models', p: 'HandsOnLLM/Hands-On-Large-Language-Models', tag: 'LLMS', d: "The O'Reilly book's notebooks, all in Colab" },
+  { n: 'Prompt Engineering Guide', p: 'dair-ai/Prompt-Engineering-Guide', tag: 'PROMPTING', d: 'Every technique, linked to its paper' },
+  { n: 'AI Agents for Beginners', p: 'microsoft/ai-agents-for-beginners', tag: 'AGENTS', d: 'Tool use, planning, memory, multi-agent' },
+  { n: 'GenAI Agents', p: 'NirDiamant/GenAI_Agents', tag: 'AGENTS', d: 'Basic chatbot to multi-agent, runnable notebooks' },
+  { n: 'RAG Techniques', p: 'NirDiamant/RAG_Techniques', tag: 'RAG', d: 'Chunking, reranking, graph RAG, with code' },
+  { n: 'Data Science Projects', p: 'ProjectProRepo/Data-Science-Projects', tag: 'PORTFOLIO', d: 'Project ideas with worked solutions' },
+  { n: 'Awesome NLP', p: 'keon/awesome-nlp', tag: 'NLP', d: 'Papers, libraries, courses and datasets' },
+  { n: 'Awesome Reinforcement Learning', p: 'aikorea/awesome-rl', tag: 'RL', d: 'Lectures, books, papers and code in one place' },
+  { n: 'Reinforcement Learning Algorithms', p: 'ChristianOrr/reinforcement-learning-algorithms', tag: 'RL', d: 'Dynamic programming to deep RL, as notebooks' },
+];
+
+const F = {
+  disp: (w, s) => `${w} ${s}px "Inter Display", Inter, sans-serif`,
+  ui: (w, s) => `${w} ${s}px Inter, sans-serif`,
+  mono: (w, s) => `${w} ${s}px "DejaVu Sans Mono", monospace`,
+};
+const WHITE = '#FFFFFF', G1 = '#B4B4B4', G2 = '#6E6E6E', G3 = '#2A2A2A';
+
+// ---------- math ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const P = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, x) => a + (b - a) * x;
+const E = {
+  outExpo: x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x),
+  inExpo: x => x <= 0 ? 0 : Math.pow(2, 10 * x - 10),
+  outCubic: x => 1 - Math.pow(1 - x, 3),
+  inCubic: x => x * x * x,
+  inOutCubic: x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2,
+  outBack: x => { const c1 = 1.8, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); },
+};
+const hit = (t, at, d = 0.12) => t < at ? 0 : Math.exp(-(t - at) / d);
+const pad2 = n => String(n).padStart(2, '0');
+const hash = (a, b = 0) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const GLYPH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/_-#$%&*+<>';
+
+// ---------- primitives ----------
+function rr(g, x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); }
+function txt(g, s, x, y, font, color, align = 'left', alpha = 1, sp = 0) {
+  g.save(); g.globalAlpha *= alpha; g.font = font; g.fillStyle = color; g.textAlign = align; g.letterSpacing = sp + 'px';
+  g.fillText(s, x, y); g.restore();
+}
+function fit(g, s, maxW, size, fn, sp = 0) { let z = size; g.letterSpacing = sp + 'px'; g.font = fn(z); while (g.measureText(s).width > maxW && z > 8) { z -= 2; g.font = fn(z); } g.letterSpacing = '0px'; return z; }
+// per-character mask reveal: glyphs slide up from a clip line
+function charsUp(g, s, x, y, font, color, t, start, stagger, size, sp = 0, align = 'left', dur = 0.3) {
+  g.save(); g.font = font; g.letterSpacing = sp + 'px';
+  const total = g.measureText(s).width;
+  let cx = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
+  g.beginPath(); g.rect(cx - 40, y - size * 1.0, total + 80, size * 1.3); g.clip();
+  g.fillStyle = color; g.textAlign = 'left';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i], w = g.measureText(ch).width;
+    const p = E.outExpo(P(t, start + i * stagger, start + i * stagger + dur));
+    if (p > 0) g.fillText(ch, cx, y + (1 - p) * size * 1.15);
+    cx += w;
+  }
+  g.restore();
+  return total;
+}
+// decode effect: random glyphs that resolve left to right (deterministic per frame)
+function decode(g, s, x, y, font, color, t, start, per, frame, align = 'left', dim = G2) {
+  g.save(); g.font = font; g.textAlign = 'left';
+  const cw = g.measureText('M').width;
+  let cx = align === 'center' ? x - cw * s.length / 2 : align === 'right' ? x - cw * s.length : x;
+  for (let i = 0; i < s.length; i++) {
+    const shown = t - start - i * per;
+    if (shown < -0.06) break;
+    if (shown >= 0) { g.fillStyle = color; g.fillText(s[i], cx + i * cw, y); }
+    else if (s[i] !== ' ') { g.fillStyle = dim; g.fillText(GLYPH[Math.floor(hash(frame, i) * GLYPH.length)], cx + i * cw, y); }
+  }
+  g.restore();
+}
+function wrap(g, s, maxW, font) {
+  g.font = font; if (g.measureText(s).width <= maxW) return [s];
+  const w = s.split(' '); let best = [s];
+  for (let i = 1; i < w.length; i++) { const a = w.slice(0, i).join(' '), b = w.slice(i).join(' ');
+    if (g.measureText(a).width <= maxW && g.measureText(b).width <= maxW) { best = [a, b]; if (g.measureText(a).width >= g.measureText(b).width) break; } }
+  return best;
+}
+function strokeText(g, s, x, y, font, color, lw, alpha = 1, align = 'left') {
+  g.save(); g.globalAlpha *= alpha; g.font = font; g.textAlign = align; g.lineWidth = lw; g.strokeStyle = color; g.lineJoin = 'round';
+  g.strokeText(s, x, y); g.restore();
+}
+
+// ---------- offscreen layer for slice transitions ----------
+const layer = document.createElement('canvas'); layer.width = W; layer.height = H;
+const lg = layer.getContext('2d');
+function sliced(offFn, bands = 9) {
+  const bh = H / bands;
+  for (let i = 0; i < bands; i++) {
+    const dx = offFn(i);
+    ctx.drawImage(layer, 0, i * bh, W, bh, dx, i * bh, W, bh);
+  }
+}
+
+// ---------- background ----------
+const grain = [];
+(() => { let a = 1601; const r = () => (a = (a * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let k = 0; k < 6; k++) { const g = document.createElement('canvas'); g.width = 480; g.height = 270; const x = g.getContext('2d');
+    const d = x.createImageData(480, 270); for (let i = 0; i < d.data.length; i += 4) { const v = r() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    x.putImageData(d, 0, 0); grain.push(g); } })();
+
+function beatEnv(t) { return t < DROP || t > 15 ? 0 : Math.exp(-((t - DROP) % BEAT) / 0.09); }
+
+function background(t, frame) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // drifting dot grid, brighter on each beat after the drop
+  const sp = 48, off = (t * 14) % sp, a = 0.10 + 0.10 * beatEnv(t);
+  ctx.fillStyle = `rgba(255,255,255,${a})`;
+  for (let y = -sp + off; y < H + sp; y += sp) for (let x = -sp + off * 0.5; x < W + sp; x += sp) ctx.fillRect(x, y, 2, 2);
+  // contribution graph (GitHub's activity squares, in grey) sweeping in during the hook
+  if (t < DROP + 0.2) {
+    const cs = 54, cols = Math.ceil(W / cs), rows = Math.ceil(H / cs), fade = 1 - P(t, DROP - 0.1, DROP + 0.2);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const v = hash(c, r), on = P(t, 0.2 + (c + r * 0.6) * 0.035, 0.5 + (c + r * 0.6) * 0.035);
+      if (v < 0.45 || on <= 0) continue;
+      const lvl = Math.floor(v * 4) / 4;
+      ctx.fillStyle = `rgba(255,255,255,${(0.025 + lvl * 0.06) * on * fade})`;
+      rr(ctx, c * cs + 6, r * cs + 6, cs - 12, cs - 12, 6); ctx.fill();
+    }
+  }
+  // vignette
+  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 1.0);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.75)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+}
+function grainPass(frame) {
+  ctx.save(); ctx.globalAlpha = 0.06; ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(grain[frame % 6], 0, 0, W, H); ctx.restore();
+}
+
+// =====================================================================
+//  HOOK  0 → 3.75
+// =====================================================================
+function hook(t, frame) {
+  const g = ctx;
+  // build: everything pushes toward the camera in the last beat before the drop
+  const b = E.inExpo(P(t, T_BUILD, DROP));
+  g.save();
+  g.translate(W / 2, H / 2); g.scale(1 + b * 0.35, 1 + b * 0.35); g.translate(-W / 2, -H / 2);
+  g.globalAlpha = 1 - b * 0.85;
+
+  const X0 = 250; g.translate(0, 60);
+  // terminal line
+  const cmd = '$ git clone --free ai-ml-curriculum';
+  g.font = F.mono(500, 30);
+  const nChars = Math.floor(P(t, T_TYPE, T_16 - 0.04) * cmd.length);
+  txt(g, cmd.slice(0, nChars), X0, 250, F.mono(500, 30), G1);
+  const cw = g.measureText('M').width;
+  if (Math.floor(t / 0.25) % 2 === 0 || t < T_16) { g.fillStyle = WHITE; g.fillRect(X0 + nChars * cw + 6, 224, 16, 32); }
+
+  // "16": slams in at beat 1 with an odometer scramble that lands on 16
+  if (t >= T_16) {
+    const p = E.outExpo(P(t, T_16, T_16 + 0.35));
+    const s = lerp(1.9, 1, p);
+    const settled = t >= T_16 + 0.30;
+    const label = settled ? '16' : pad2(Math.floor(hash(Math.floor(t * 30), 3) * 99));
+    g.save(); g.translate(X0 + 230, 600); g.scale(s, s); g.globalAlpha *= p;
+    txt(g, label, 0, 90, F.disp(800, 430), WHITE, 'center', 1, -18);
+    g.restore();
+    // shock ring when it lands
+    const rp = P(t, T_16, T_16 + 0.45);
+    if (rp > 0 && rp < 1) { g.save(); g.strokeStyle = `rgba(255,255,255,${0.5 * (1 - rp)})`; g.lineWidth = 3; g.beginPath(); g.arc(X0 + 230, 540, 120 + rp * 520, 0, Math.PI * 2); g.stroke(); g.restore(); }
+  }
+  // GITHUB / REPOS
+  if (t >= T_GH) {
+    charsUp(g, 'GITHUB', X0 + 520, 520, F.disp(800, 150), WHITE, t, T_GH, 0.035, 150, -3);
+    charsUp(g, 'REPOS', X0 + 520, 680, F.disp(800, 150), WHITE, t, T_GH + 0.12, 0.035, 150, -3);
+    // a rule that draws under the block
+    const lp = E.outExpo(P(t, T_GH + 0.1, T_GH + 0.6));
+    g.fillStyle = WHITE; g.fillRect(X0, 745, (1420) * lp, 3);
+  }
+  // that teach more AI/ML than a $1,000 course
+  if (t >= T_LINE) charsUp(g, 'that teach more AI/ML than a', X0, 830, F.ui(500, 54), G1, t, T_LINE, 0.012, 54);
+  if (t >= T_COST) {
+    const p = E.outBack(P(t, T_COST, T_COST + 0.3));
+    g.save(); g.font = F.disp(800, 96);
+    const w = g.measureText('$1,000 course').width;
+    g.font = F.ui(500, 54); const lw = g.measureText('that teach more AI/ML than a ').width;
+    g.translate(X0 + lw + 6, 830); g.scale(p, p);
+    txt(g, '$1,000 course', 0, 0, F.disp(800, 96), WHITE);
+    // the strike-through
+    const sp = E.outExpo(P(t, T_STRIKE, T_STRIKE + 0.25));
+    if (sp > 0) { g.fillStyle = WHITE; g.fillRect(-12, -40, (w + 24) * sp, 10); }
+    g.restore();
+  }
+  g.restore();
+  // speed lines converging on the drop
+  if (b > 0) {
+    g.save(); g.strokeStyle = WHITE; g.lineCap = 'round';
+    for (let i = 0; i < 48; i++) {
+      const ang = hash(i, 9) * Math.PI * 2, r0 = 1100 * (1 - b) + 80, len = 60 + 320 * b * hash(i, 4);
+      g.globalAlpha = 0.25 + 0.6 * b * hash(i, 5); g.lineWidth = 1 + 3 * hash(i, 6);
+      g.beginPath(); g.moveTo(W / 2 + Math.cos(ang) * (r0 + len), H / 2 + Math.sin(ang) * (r0 + len));
+      g.lineTo(W / 2 + Math.cos(ang) * r0, H / 2 + Math.sin(ang) * r0); g.stroke();
+    }
+    g.restore();
+  }
+}
+
+// =====================================================================
+//  REPO CARD  (drawn into the offscreen layer, then sliced in)
+// =====================================================================
+function bookIcon(g, x, y, s, color) {
+  g.save(); g.strokeStyle = color; g.lineWidth = 2.5; g.lineJoin = 'round';
+  rr(g, x, y - s, s * 0.78, s, 3); g.stroke();
+  g.beginPath(); g.moveTo(x + s * 0.18, y - s); g.lineTo(x + s * 0.18, y); g.stroke();
+  g.restore();
+}
+function card(g, k, u, frame) {
+  const r = REPOS[k], inv = k === STAR;
+  const FG = inv ? '#000' : WHITE, SUB = inv ? '#3A3A3A' : G1, DIM = inv ? '#8A8A8A' : G2;
+  g.clearRect(0, 0, W, H);
+  if (inv) { g.fillStyle = WHITE; g.fillRect(0, 0, W, H); }
+
+  // giant outlined index, odometer roll
+  const np = E.outExpo(P(u, 0, 0.22));
+  g.save(); g.beginPath(); g.rect(60, 250, 640, 600); g.clip();
+  strokeText(g, pad2(k + 1), 110, 770 + (1 - np) * 520, F.disp(800, 520), FG, 3, inv ? 0.9 : 0.55);
+  if (k > 0 && np < 1) strokeText(g, pad2(k), 110, 770 - np * 520, F.disp(800, 520), FG, 3, (inv ? 0.9 : 0.55) * (1 - np));
+  g.restore();
+  txt(g, '/16', 120, 860, F.mono(600, 30), DIM, 'left', E.outCubic(P(u, 0.05, 0.2)));
+
+  const X = 760;
+  // tag pill
+  const tp = E.outExpo(P(u, 0.0, 0.16));
+  g.save(); g.font = F.mono(700, 24); g.letterSpacing = '3px';
+  const label = (inv ? '★ ' : '') + r.tag, tw = g.measureText(label).width + 36;
+  if (inv) { rr(g, X, 300, tw * tp, 46, 23); g.fillStyle = '#000'; g.fill(); }
+  else { rr(g, X, 300, tw * tp, 46, 23); g.strokeStyle = WHITE; g.lineWidth = 2; g.stroke(); }
+  g.restore();
+  if (tp > 0.6) txt(g, label, X + 18, 332, F.mono(700, 24), inv ? WHITE : FG, 'left', P(tp, 0.6, 1), 3);
+
+  // name
+  const size = fit(g, r.n, 990, 112, z => F.disp(800, z), -2);
+  charsUp(g, r.n, X, 480, F.disp(800, size), FG, u, 0.02, 0.006, size, -2, 'left', 0.26);
+  // owner/repo, decoding
+  bookIcon(g, X, 572, 30, SUB);
+  const ps = Math.min(32, Math.floor(1000 / (r.p.length * 0.61)));
+  decode(g, r.p, X + 44, 570, F.mono(500, ps), SUB, u, 0.05, 0.0045, frame, 'left', DIM);
+  // description
+  const dp = E.outCubic(P(u, 0.10, 0.26));
+  txt(g, r.d, X + (1 - dp) * 30, 660, F.ui(500, 38), FG, 'left', dp * (inv ? 0.85 : 0.72));
+  // underline sweep
+  g.fillStyle = FG; g.fillRect(X, 700, 1040 * E.outExpo(P(u, 0.04, 0.4)), 2);
+
+  // index spine on the right: 01..16, current one lit
+  for (let i = 0; i < 16; i++) {
+    const y = 236 + i * 40, cur = i === k, done = i < k;
+    txt(g, pad2(i + 1), 1830, y, F.mono(cur ? 700 : 500, cur ? 24 : 18), FG, 'right', cur ? 1 : done ? 0.5 : 0.18);
+    if (cur) { g.fillStyle = FG; g.fillRect(1842, y - 18, 6, 22); }
+  }
+}
+
+// =====================================================================
+//  OUTRO GRID  11.25 → 15
+// =====================================================================
+function outro(t, frame) {
+  const g = ctx;
+  const dim = 1 - 0.86 * E.outCubic(P(t, END_HIT, END_HIT + 0.2));
+  g.save(); g.globalAlpha = dim;
+  charsUp(g, '16 REPOS', 120, 205, F.disp(800, 92), WHITE, t, OUTRO, 0.025, 92, -2);
+  const sp = E.outCubic(P(t, OUTRO + 0.25, OUTRO + 0.6));
+  txt(g, 'that teach more AI/ML than a $1,000 course', 1800, 200, F.ui(500, 34), G1, 'right', sp);
+  const cols = 4, x0 = 120, y0 = 260, cw = 420, ch = 158;
+  for (let i = 0; i < 16; i++) {
+    const r = REPOS[i], c = i % cols, row = Math.floor(i / cols);
+    const st = OUTRO + 0.1 + i * S16 * 0.9, p = E.outExpo(P(t, st, st + 0.35));
+    if (p <= 0) continue;
+    const x = x0 + c * cw, y = y0 + row * ch + (1 - p) * 40, inv = i === STAR;
+    g.save(); g.globalAlpha *= p;
+    if (inv) { rr(g, x + 4, y + 6, cw - 12, ch - 14, 10); g.fillStyle = WHITE; g.fill(); }
+    else { g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(x + 4, y + 6, (cw - 12) * p, 2); }
+    const FG = inv ? '#000' : WHITE, SUB = inv ? '#444' : G2;
+    txt(g, pad2(i + 1), x + 20, y + 40, F.mono(700, 20), SUB);
+    if (inv) txt(g, '★', x + cw - 36, y + 46, F.ui(700, 24), '#000', 'right');
+    const lines = wrap(g, r.n, cw - 48, F.ui(700, 28));
+    lines.forEach((ln, j) => txt(g, ln, x + 20, y + 88 + j * 31 - (lines.length - 1) * 8, F.ui(700, 28), FG));
+    const ps = fit(g, r.p, cw - 48, 16, z => F.mono(500, z));
+    txt(g, r.p, x + 20, y + 140, F.mono(500, ps), SUB);
+    g.restore();
+  }
+  g.restore();
+
+  // SAVE THIS. — the last hit
+  if (t >= END_HIT) {
+    const p = E.outExpo(P(t, END_HIT, END_HIT + 0.3));
+    const s = lerp(1.35, 1, p);
+    g.save(); g.globalAlpha = 0.9 * p; g.fillStyle = '#000'; rr(g, W / 2 - 700, 290, 1400, 420, 24); g.fill(); g.restore();
+    g.save(); g.translate(W / 2, 470); g.scale(s, s); g.globalAlpha = p;
+    txt(g, 'SAVE THIS.', 0, 0, F.disp(800, 210), WHITE, 'center', 1, -6);
+    g.restore();
+    const lp = E.outExpo(P(t, END_HIT + 0.08, END_HIT + 0.5));
+    g.fillStyle = WHITE; g.fillRect(W / 2 - 520 * lp, 520, 1040 * lp, 3);
+    decode(g, '16 repos · $0 · start with #01, finish with #07', W / 2, 640, F.mono(500, 34), G1, t, END_HIT + 0.1, 0.008, frame, 'center');
+  }
+}
+
+function watermark() {
+  ctx.save(); ctx.font = F.disp(600, 24); ctx.letterSpacing = '1px'; ctx.textBaseline = 'middle';
+  ctx.globalCompositeOperation = 'difference';     // stays visible on the white #07 frame
+  ctx.fillStyle = 'rgba(255,255,255,0.40)';
+  ctx.textAlign = 'left'; ctx.fillText('x.com/nrqa__', 44, 52);
+  ctx.textAlign = 'right'; ctx.fillText('x.com/nrqa__', W - 44, H - 40);
+  ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.textAlign = 'center'; ctx.fillText('x.com/nrqa__', W / 2, H / 2);
+  ctx.restore();
+}
+
+// =====================================================================
+window.renderFrame = function (t, frame = Math.round(t * FPS)) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  background(t, frame);
+  // punch-zoom + shake on the hits
+  let punch = hit(t, DROP, 0.14) * 0.06 + hit(t, T_STAR, 0.14) * 0.05 + hit(t, OUTRO, 0.14) * 0.05 + hit(t, END_HIT, 0.12) * 0.03 + hit(t, T_16, 0.1) * 0.03;
+  for (let k = 1; k < 16; k++) if (k !== STAR) punch += hit(t, T_REPO(k), 0.08) * 0.018;
+  const sh = 16 * hit(t, DROP, 0.1) + 14 * hit(t, T_STAR, 0.1) + 14 * hit(t, OUTRO, 0.1) + 6 * hit(t, END_HIT, 0.08);
+  ctx.save();
+  ctx.translate(W / 2 + (hash(frame, 1) - 0.5) * sh, H / 2 + (hash(frame, 2) - 0.5) * sh);
+  ctx.scale(1 + punch, 1 + punch); ctx.translate(-W / 2, -H / 2);
+
+  if (t < DROP) hook(t, frame);
+  else if (t < OUTRO) {
+    let k = 0; while (k < 15 && t >= T_REPO(k + 1)) k++;
+    const u = t - T_REPO(k);
+    card(lg, k, u, frame);
+    const dir = k % 2 ? -1 : 1, tp = 1 - E.outExpo(P(u, 0, 0.24));
+    sliced(i => dir * tp * W * (0.10 + 0.22 * hash(k, i)) * (i % 2 ? 1 : -0.6));
+  } else outro(t, frame);
+  ctx.restore();
+
+  // flashes
+  const fl = 0.9 * hit(t, DROP, 0.07) + 0.75 * hit(t, T_STAR, 0.06) + 0.7 * hit(t, OUTRO, 0.07) + 0.5 * hit(t, END_HIT, 0.06);
+  if (fl > 0.01) { ctx.fillStyle = `rgba(255,255,255,${fl})`; ctx.fillRect(0, 0, W, H); }
+  grainPass(frame);
+  watermark();
+};
+
+// =====================================================================
+//  SOUND CUES — derived from the same timing constants the picture uses
+//  (never typed by hand). Exported to audio/cues.json by export_cues.mjs.
+//  visual: cut (full-frame change) · move (peak speed) · land (motion stops) · appear
+//  Sound ids are chosen with sfx.py browse; SND maps a role to that pick.
+// =====================================================================
+// Picked by eye from sfx.py browse (waveform + spectrogram). One family: metal + sub, digital accents.
+const SND = {
+  drop:  'hit/fs-578790-metal-hit-1-1+boom/fs-636624-deep-hit-2',
+  star:  'hit/fs-198115-clang-2-1+boom/fs-197462-kick-dubstep-kick-1',
+  outro: 'hit/fs-321482-metal-hit-2-1+boom/fs-268608-juno-sub-wav-1',
+  save:  'hit/fs-337833-med-metal-hit-01-wav-1+boom/fs-636624-deep-hit-2',
+  rise:  'riser/fs-503801-reverse-fx-3-wav-1',
+  rise2: 'riser/fs-275512-reversed-riser-wav-1',
+  rev:   'reverse/fs-148930-cymbal-hits-reversed-wav-2',
+  keys:  ['key/fs-539146-keyboard-typing-001-wav-2', 'key/fs-180974-key-1', 'key/fs-180997-enter-key-2'],
+  sixteen: 'glitch/fs-251678-fx-shortage-1-1',
+  github: 'swish/fs-733018-whip-3-1',
+  cost:  'pop/fs-174695-sci-fi-bubble-pop-1',
+  strike: 'zap/kenney-scifi-laser-small-004',
+  glitch: ['glitch/fs-349900-digital-glitches-2', 'glitch/fs-107369-wierd-glitch-loop-wav-3', 'glitch/fs-367960-zap-wav-1', 'glitch/fs-58929-interference-aif-2'],
+  swish: ['swish/fs-254871-swish-whip-wav-2', 'swish/fs-395264-sword-movement-single-3-1', 'swish/fs-395263-sword-movement-single-4-1', 'swish/fs-395418-multiple-swish-1'],
+  ticks: ['tick/fs-386209-ratchet-drill-unbranded-tigh-2', 'tick/fs-386209-ratchet-drill-unbranded-tigh-1', 'tick/fs-386206-ratchet-stahlwille-tighten-1-3', 'tick/fs-386209-ratchet-drill-unbranded-tigh-3'],
+};
+window.soundCues = function () {
+  const cues = [];
+  const hero = (id, t, rise) => {
+    cues.push({ id, t, sound: SND[id], weight: 'hero', visual: 'cut', stop_before: true, build: true });
+    cues.push({ id: id + '-rise', t, sound: SND[rise], weight: 'support', align: 'peak' });
+  };
+  hero('drop', DROP, 'rise');
+  hero('star', T_STAR, 'rev');
+  hero('outro', OUTRO, 'rise2');
+  cues.push({ id: 'save', t: END_HIT, sound: SND.save, weight: 'hero', visual: 'appear' });
+  // hook: three key presses while the command types, then one sound per element that lands
+  const cmdLen = 35, typeEnd = T_16 - 0.04;
+  [4, 17, 30].forEach((c, i) => cues.push({ id: `key${i + 1}`, t: q(T_TYPE + (typeEnd - T_TYPE) * c / cmdLen), sound: SND.keys[i], visual: 'appear', pan: -0.4 + i * 0.15 }));
+  cues.push({ id: 'sixteen', t: T_16, sound: SND.sixteen, visual: 'appear' });
+  cues.push({ id: 'github', t: T_GH, sound: SND.github, visual: 'appear', pan: 0.2 });
+  cues.push({ id: 'line', t: T_LINE, sound: SND.ticks[0], visual: 'appear', pan: -0.2 });
+  cues.push({ id: 'cost', t: T_COST, sound: SND.cost, visual: 'appear', pan: 0.2 });
+  cues.push({ id: 'strike', t: T_STRIKE, sound: SND.strike, visual: 'appear' });
+  // repo run: a cut on every beat (the drop and #07 are heroes); glitch and swish alternate, each rotating
+  let gi = 0, si = 0;
+  for (let k = 1; k < 16; k++) if (k !== STAR)
+    cues.push({ id: `cut${pad2(k + 1)}`, t: T_REPO(k), sound: k % 2 ? SND.glitch[gi++ % 4] : SND.swish[si++ % 4], visual: 'cut', pan: k % 2 ? 0.25 : -0.25 });
+  // outro grid: a tick as rows 2-4 start (row 1 lands on the outro hit itself)
+  for (let row = 1; row < 4; row++) cues.push({ id: `row${row + 1}`, t: q(OUTRO + 0.1 + row * 4 * S16 * 0.9), sound: SND.ticks[row], visual: 'appear', pan: -0.3 + row * 0.2 });
+  return cues.map(c => ({ ...c, t: +c.t.toFixed(4) }));
+};
+window.ready = document.fonts.load(F.disp(800, 100)).then(() => document.fonts.load(F.ui(500, 40))).then(() => document.fonts.load(F.mono(500, 30))).then(() => renderFrame(0));
+</script>
+</body>
+</html>
