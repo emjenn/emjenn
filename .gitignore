@@ -1,2 +1,4 @@
 video/build/
+out/video_noaudio.mp4
 node_modules/
+sound-layer/
