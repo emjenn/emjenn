@@ -2,3 +2,7 @@ video/build/
 out/video_noaudio.mp4
 node_modules/
 sound-layer/
+v2/audio/kit/*
+!v2/audio/kit/CREDITS.md
+v2/audio/candidates/
+v2/out/video_noaudio.mp4
