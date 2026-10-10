@@ -1,2 +1,7 @@
 out/video_noaudio.mp4
 node_modules/
+sound-layer/
+v2/audio/kit/
+v2/audio/stems/
+v2/audio/candidates/
+v2/video.mp4
