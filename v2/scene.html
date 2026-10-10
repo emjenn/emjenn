@@ -380,6 +380,34 @@ window.renderFrame = function (t, frame = 0) {
   finish(t, frame);
   watermark();
 };
+// =====================================================================
+//  SOUND CUES — derived from the same timing constants the picture uses
+//  (never typed by hand). Exported to audio/cues.json by export_cues.mjs.
+//  visual: cut (full-frame change) · move · land (motion stops) · appear
+// =====================================================================
+window.soundCues = function () {
+  const cues = [];
+  // heroes, ~4 s apart: the drop, a mid-run slam, the outro drop, the last hit
+  const hero = (id, t, visual) => {
+    cues.push({ id, t, sound: 'hit+boom', weight: 'hero', visual, stop_before: true, build: true });
+    cues.push({ id: id + '-rise', t, sound: id === 'outro' ? 'reverse' : 'riser', weight: 'support', align: 'peak' });
+  };
+  hero('drop', DROP, 'cut');
+  hero('openai', DROP + 5 * SLOT, 'cut');
+  hero('outro', OUTRO, 'cut');
+  cues.push({ id: 'last', t: END_HIT, sound: 'thump+tap', weight: 'hero', visual: 'appear' });
+  // intro: the "10" rises, then ten logo tiles pop in on 16ths (every other one gets a sound)
+  cues.push({ id: 'ten', t: 0.05 + 0.32 * 0.5, sound: 'whoosh', visual: 'move' });
+  for (let i = 0; i < 10; i += 2) cues.push({ id: `tile${i + 1}`, t: 0.5 + i * S16 * 0.9 + 0.12, sound: 'pop', visual: 'appear', pan: -0.5 + i * 0.1 });
+  // company run: slice cut + tile landing (the logo slam settles at 0.3 s)
+  for (let k = 0; k < 10; k++) {
+    const t0 = DROP + k * SLOT;
+    if (k !== 0 && k !== 5) cues.push({ id: `cut${k + 1}`, t: t0, sound: 'swish', visual: 'cut', pan: k % 2 ? 0.3 : -0.3 });
+    cues.push({ id: `land${k + 1}`, t: t0 + 0.3, sound: 'tap', visual: 'land', pan: -0.25 });
+  }
+  cues.push({ id: 'cta', t: OUTRO + 1.0, sound: 'ui', visual: 'appear' });
+  return cues.map(c => ({ ...c, t: +c.t.toFixed(4) }));
+};
 window.ready.then(() => renderFrame(0));
 </script>
 </body>
