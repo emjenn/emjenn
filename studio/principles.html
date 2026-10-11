@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080">
+<title>Animation Principles Loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; background: #F4F2EE; }
+  #stage { position: relative; width: 1080px; height: 1080px; overflow: hidden; background: #F4F2EE; }
+  #stage canvas { display: block; width: 1080px; height: 1080px; }
+  #labels {
+    position: absolute; left: 54px; top: 50px;
+    font-family: 'Geist Mono', ui-monospace, monospace; font-size: 28px; font-weight: 500;
+    letter-spacing: 0.01em; line-height: 1;
+  }
+  .row { display: flex; align-items: center; height: 46px; color: #8E8A83; white-space: pre; }
+  .row.on { color: #0F0F0F; }
+  .row .amp { color: #D97757; }
+  .dia {
+    width: 15px; height: 15px; margin: 0 22px 0 5px; box-sizing: border-box;
+    transform: rotate(45deg); border: 2px solid #8E8A83; background: transparent;
+  }
+  .row.on .dia { background: #FF6A2B; border-color: #0F0F0F; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage">
+  <div id="labels">
+    <div class="row"><span class="dia"></span>01 ANTICIPATION</div>
+    <div class="row"><span class="dia"></span>02 SQUASH <span class="amp">&amp;</span> STRETCH</div>
+    <div class="row"><span class="dia"></span>03 OVERLAPPING ACTION</div>
+    <div class="row"><span class="dia"></span>04 FOLLOW-THROUGH</div>
+    <div class="row"><span class="dia"></span>05 ARCS</div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// ───────────────────────── timing ─────────────────────────
+const SIZE = 1080, FPS = 60, FRAMES = 480;
+const ON = { key: 6, rim: 24, top: 42 };          // light clicks (frames)
+const OFF = 468;                                   // lights, diamonds, labels snap off
+const LABEL_ON = [69, 140, 200, 285, 303];         // checklist rows
+const DIAMOND_X = [-4, -2, 0, 2, 4];
+const SLAB_TOP = 0, GROUND = 0.02;                 // mascot stands on the cells
+const FLOOR = -2.7;
+
+// hops: crouch start, takeoff, landing; crouch / landing squash (x, y)
+const JUMPS = [
+  { c0: 69,  to: 80,  land: 105, x0: -4, x1: -2, h: 1.3, crouch: [1.2, 0.75], squash: [1.25, 0.7], dia: 1 },
+  { c0: 129, to: 140, land: 165, x0: -2, x1:  0, h: 1.3, crouch: [1.2, 0.75], squash: [1.25, 0.7], dia: 2 },
+  { c0: 189, to: 200, land: 225, x0:  0, x1:  2, h: 1.3, crouch: [1.2, 0.75], squash: [1.25, 0.7], dia: 3 },
+  { c0: 249, to: 260, land: 285, x0:  2, x1:  4, h: 1.3, crouch: [1.2, 0.75], squash: [1.25, 0.7], dia: 4 },
+  { c0: 312, to: 330, land: 384, x0:  4, x1: -4, h: 3.5, crouch: [1.32, 0.6], squash: [1.34, 0.62], dia: 0, flip: true },
+];
+const STRETCH = [0.85, 1.28];
+const ARC = { f0: 303, f1: 318, dots: 26 };
+
+// ───────────────────────── helpers ─────────────────────────
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, u) => a + (b - a) * u;
+const smooth = u => { u = clamp(u); return u * u * (3 - 2 * u); };
+const easeInOut = u => { u = clamp(u); return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; };
+const easeOut = u => 1 - Math.pow(1 - clamp(u), 3);
+const wrap = f => ((f % FRAMES) + FRAMES) % FRAMES;
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function kelvin(k) {                               // Tanner Helland approximation, sRGB 0..1
+  const t = k / 100; let r, g, b;
+  if (t <= 66) { r = 255; g = 99.4708025861 * Math.log(t) - 161.1195681661; }
+  else { r = 329.698727446 * Math.pow(t - 60, -0.1332047592); g = 288.1221695283 * Math.pow(t - 60, -0.0755148492); }
+  if (t >= 66) b = 255; else if (t <= 19) b = 0; else b = 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  return new THREE.Color().setRGB(clamp(r / 255), clamp(g / 255), clamp(b / 255), THREE.SRGBColorSpace);
+}
+// 3-frame flicker on, hard snap off at 468
+function lightLevel(f, on) {
+  if (f < on || f >= OFF) return 0;
+  const d = Math.floor(f - on);
+  return d === 0 ? 1 : d === 1 ? 0.12 : d === 2 ? 0.8 : 1;
+}
+
+// ───────────────────────── motion model (pure functions of frame) ─────────────────────────
+function basePos(f) {
+  let x = -4, y = 0;
+  for (const J of JUMPS) {
+    if (f >= J.land) { x = J.x1; continue; }
+    if (f >= J.to) { const u = (f - J.to) / (J.land - J.to); x = lerp(J.x0, J.x1, u); y = J.h * 4 * u * (1 - u); }
+    break;
+  }
+  return { x, y };
+}
+const vel = (f, axis) => (basePos(f + 0.25)[axis] - basePos(f - 0.25)[axis]) * 2 * FPS;   // units / s
+
+function spring(tau, freq, zeta) {                 // unit-amplitude damped cosine
+  if (tau < 0) return 0;
+  const w = 2 * Math.PI * freq, wd = w * Math.sqrt(1 - zeta * zeta);
+  return Math.exp(-zeta * w * tau) * Math.cos(wd * tau);
+}
+function bodyScale(f) {
+  let sx = 1, sy = 1;
+  for (const J of JUMPS) {
+    if (f >= J.c0 && f < J.to) {                   // anticipation crouch
+      const e = easeOut((f - J.c0) / (J.to - J.c0));
+      sx = lerp(1, J.crouch[0], e); sy = lerp(1, J.crouch[1], e);
+    } else if (f >= J.to && f < J.land) {          // stretch at takeoff, relax through the air
+      const u = f - J.to, k = Math.exp(-u / 7), pre = smooth((u - (J.land - J.to - 6)) / 6) * 0.06;
+      sx = lerp(1, STRETCH[0], k) - pre * 0.5; sy = lerp(1, STRETCH[1], k) + pre;
+    } else if (f >= J.land && f < J.land + 70) {   // squash, spring back at damping 0.55
+      const s = spring((f - J.land) / FPS, 3.0, 0.55);
+      sx = 1 + (J.squash[0] - 1) * s; sy = 1 + (J.squash[1] - 1) * s;
+    }
+  }
+  return { sx, sy };
+}
+function armDroop(f) {                             // + = tips down
+  const fl = f - 4;                                // arms lag 4 frames
+  let a = clamp(vel(fl, 'y') * 0.045, -0.75, 0.75);
+  for (const J of JUMPS) {
+    const tau = (f - (J.land + 4)) / FPS;          // follow-through: 2.2 Hz, damping 0.22
+    if (tau >= 0 && tau < 1.6) a += (J.flip ? 0.75 : 0.62) * spring(tau, 2.2, 0.22) * smooth(tau * 30);
+    const tc = f - (J.c0 + 4);                      // arms swing back into the crouch
+    if (tc >= 0 && f < J.to + 4) a += -0.35 * smooth(tc / 8);
+  }
+  return a;
+}
+function legState(f) {                             // legs lag 6 frames
+  const fl = f - 6;
+  const rot = clamp(-vel(fl, 'x') * 0.045, -0.5, 0.5);
+  const { sy } = bodyScale(fl);
+  const air = basePos(fl).y > 0.05 ? smooth(basePos(fl).y / 0.6) : 0;
+  return { rot, sy: 1 + (sy - 1) * 0.55 + air * 0.12 };
+}
+function flipAngle(f) {
+  const J = JUMPS[4];
+  if (f < J.to) return 0;
+  if (f >= J.land) return Math.PI * 2;
+  const u = (f - J.to) / (J.land - J.to);
+  return Math.PI * 2 * smooth(lerp(-0.04, 1.02, u));
+}
+function playheadX(f) {
+  if (f < 315) return -5.5 + f / 30;                // constant speed: crosses diamond k on frame 45 + 60k
+  if (f < 330) return lerp(5.0, 4.0, easeInOut((f - 315) / 15));
+  if (f < 384) return basePos(f).x;                 // rewinds under the flip
+  if (f < 440) return -4;
+  return lerp(-4, -5.5, easeInOut((f - 440) / 40));
+}
+function eyeLook(f) {
+  const looks = [ // [frame, dx, dy]
+    [ON.key + 1, 0.055, 0.035], [ON.rim + 1, -0.06, 0.02], [ON.top + 1, 0.0, 0.065], [62, 0, 0],
+  ];
+  let dx = 0, dy = 0;
+  for (const [f0, x, y] of looks) {
+    const e = easeOut((f - f0) / 6);
+    dx = lerp(dx, x, e); dy = lerp(dy, y, e);
+  }
+  // eyes follow the flip landing
+  return { dx, dy };
+}
+function blink(f) {
+  const d = f - 432;
+  if (d < 0 || d > 9) return 1;
+  return d < 3 ? lerp(1, 0.12, d / 3) : d < 5 ? 0.12 : lerp(0.12, 1, (d - 5) / 4);
+}
+function pushIn(f) {                               // 25 % push while hopping
+  return smooth((f - 55) / 55) * (1 - smooth((f - 292) / 34));
+}
+function punchIn(f) {                              // 4 % punch on flip landing
+  const d = f - 384;
+  if (d < 0) return 0;
+  return (1 - Math.exp(-d / 2.2)) * Math.exp(-d / 22);
+}
+function trackX(f) {                               // smoothed mascot x for camera tracking
+  let s = 0, n = 16;
+  for (let i = 0; i < n; i++) s += basePos(wrap(f - i * 2)).x;
+  return s / n;
+}
+
+// ───────────────────────── renderer ─────────────────────────
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(1);
+renderer.setSize(SIZE, SIZE, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+stage.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#F4F2EE');
+const camera = new THREE.PerspectiveCamera(18, 1, 1, 200);
+
+const BLOOM = 1;
+const glowMats = [];
+function glow(mesh, color) {                       // emissive object → feeds selective bloom
+  const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(0.5) });
+  mesh.userData.glow = m; glowMats.push(m);
+  return m;
+}
+const dummy = new THREE.Object3D();
+
+// ───────────────────────── backdrop (cyclorama) ─────────────────────────
+// spill from the studio lights is graded onto the backdrop as emissive so every click reads on the wall
+const cycMat = new THREE.MeshStandardMaterial({ color: '#F4F2EE', roughness: 0.96, metalness: 0, dithering: true, side: THREE.DoubleSide, emissive: new THREE.Color('#F4F2EE'), emissiveIntensity: 0 });
+{
+  const R = 7, zc = -6.5, prof = [];
+  prof.push([30, FLOOR], [zc, FLOOR]);
+  for (let i = 1; i <= 24; i++) { const a = (i / 24) * Math.PI / 2; prof.push([zc - R * Math.sin(a), FLOOR + R - R * Math.cos(a)]); }
+  prof.push([zc - R, 60]);
+  const pos = [], idx = [];
+  prof.forEach(([z, y]) => { pos.push(-80, y, z, 80, y, z); });
+  for (let i = 0; i < prof.length - 1; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  const cyc = new THREE.Mesh(g, cycMat); cyc.receiveShadow = true; scene.add(cyc);
+}
+// soft contact shadow under the floating slab
+{
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 640;
+  const x = c.getContext('2d');
+  x.filter = 'blur(46px)'; x.fillStyle = 'rgba(40,34,28,1)';
+  x.beginPath(); x.roundRect(170, 150, 684, 340, 60); x.fill();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.30, depthWrite: false, dithering: true });
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(18, 11.25), m);
+  p.rotation.x = -Math.PI / 2; p.position.set(0.25, FLOOR + 0.01, -0.35); scene.add(p);
+}
+
+// ───────────────────────── slab + timeline ─────────────────────────
+const slab = new THREE.Mesh(new RoundedBoxGeometry(12, 0.5, 6, 4, 0.07),
+  new THREE.MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.62, dithering: true }));
+slab.position.y = SLAB_TOP - 0.25; slab.castShadow = slab.receiveShadow = true; scene.add(slab);
+
+const TRACK_Z = [-0.72, 0, 0.72], CELL = 0.25, CELL_X0 = -5.5, CELLS_PER = 44;
+const cellGeo = new RoundedBoxGeometry(0.218, 0.04, 0.218, 1, 0.012);
+const cells = new THREE.InstancedMesh(cellGeo, new THREE.MeshStandardMaterial({ color: '#EFEEEA', roughness: 0.7 }), TRACK_Z.length * CELLS_PER);
+cells.receiveShadow = true; scene.add(cells);
+const cellPos = [];
+TRACK_Z.forEach(z => { for (let i = 0; i < CELLS_PER; i++) cellPos.push([CELL_X0 + (i + 0.5) * CELL, z]); });
+
+// track rails (hairlines) and ruler
+const ink = new THREE.MeshBasicMaterial({ color: '#C9C5BD' });
+TRACK_Z.forEach(z => [-1, 1].forEach(s => {
+  const r = new THREE.Mesh(new THREE.BoxGeometry(11.1, 0.004, 0.012), ink);
+  r.position.set(0, SLAB_TOP + 0.003, z + s * 0.135); scene.add(r);
+}));
+const RULER_Z = -1.45;
+{
+  const tickMat = new THREE.MeshBasicMaterial({ color: '#7D7973' });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(11.1, 0.006, 0.02), tickMat);
+  base.position.set(0, SLAB_TOP + 0.004, RULER_Z + 0.2); scene.add(base);
+  const n = 45, ticks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.018, 0.006, 1), tickMat, n);
+  for (let i = 0; i < n; i++) {
+    const x = CELL_X0 + i * CELL, major = (i % 4) === 2, len = major ? 0.34 : 0.14;
+    dummy.position.set(x, SLAB_TOP + 0.004, RULER_Z + 0.2 - len / 2); dummy.scale.set(major ? 1.4 : 1, 1, len); dummy.updateMatrix();
+    ticks.setMatrixAt(i, dummy.matrix);
+  }
+  scene.add(ticks);
+}
+const numberMeshes = [];
+function rulerNumbers() {
+  for (let k = 1; k <= 9; k++) {
+    const x = -5 + k, frame = 15 + 30 * k;          // frame under each unit: playhead crosses it on that frame
+    const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+    const g = c.getContext('2d');
+    g.font = '500 92px "Geist Mono"'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#5E5A54'; g.fillText(String(frame), 128, 68);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.84, 0.42),
+      new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.8, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(x, SLAB_TOP + 0.006, RULER_Z - 0.42);
+    scene.add(m); numberMeshes.push(m);
+  }
+}
+
+// keyframe diamonds
+const diaWhite = new THREE.MeshStandardMaterial({ color: '#FFFFFF', roughness: 0.4 });
+const diaLit = new THREE.MeshBasicMaterial({ color: '#FF6A2B' });
+const diaInk = new THREE.MeshStandardMaterial({ color: '#0F0F0F', roughness: 0.5 });
+const diamonds = DIAMOND_X.map(x => {
+  const g = new THREE.Group(); g.position.set(x, SLAB_TOP, 0); g.rotation.y = Math.PI / 4;
+  const outline = new THREE.Mesh(new RoundedBoxGeometry(0.36, 0.09, 0.36, 1, 0.02), diaInk);
+  outline.position.y = 0.045; outline.castShadow = true;
+  const top = new THREE.Mesh(new RoundedBoxGeometry(0.27, 0.04, 0.27, 1, 0.012), diaWhite);
+  top.position.y = 0.083; glow(top, '#FF6A2B');
+  g.add(outline, top); scene.add(g);
+  const light = new THREE.PointLight(new THREE.Color('#FF6A2B'), 0, 2.4, 2);
+  light.position.set(x, SLAB_TOP + 0.32, 0.05); scene.add(light);
+  return { g, top, light };
+});
+
+// playhead: line under the diamonds, head on the ruler, light at the front edge of the track
+const phMat = new THREE.MeshBasicMaterial({ color: '#FF6A2B' });
+const playhead = new THREE.Group(); scene.add(playhead);
+{
+  const line = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.006, 2.62), phMat);
+  line.position.set(0, SLAB_TOP + 0.03, RULER_Z + 1.35 + 0.12); glow(line, '#FF6A2B');
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.05, 3), phMat);
+  head.rotation.y = Math.PI / 2; head.position.set(0, SLAB_TOP + 0.03, RULER_Z + 0.08); glow(head, '#FF6A2B');
+  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), phMat);
+  bead.position.set(0, SLAB_TOP + 0.06, 1.05); glow(bead, '#FF8A50');
+  playhead.add(line, head, bead);
+}
+const phLight = new THREE.PointLight(new THREE.Color('#FF6A2B'), 0.3, 3.2, 2);
+phLight.position.set(0, SLAB_TOP + 0.2, 1.08); playhead.add(phLight);
+
+// dotted arc for the flip: starts above the mascot's head on diamond 5
+const ARC_Y0 = 1.62;
+const arcPoint = u => new THREE.Vector3(lerp(4, -4, u), ARC_Y0 + 3.5 * 4 * u * (1 - u), 0);
+const arcDots = new THREE.InstancedMesh(new THREE.BoxGeometry(0.075, 0.075, 0.075),
+  new THREE.MeshStandardMaterial({ color: '#0F0F0F', roughness: 0.5 }), ARC.dots);
+scene.add(arcDots);
+
+// sparks: 12 voxel sparks per landing
+const SPARK_N = 12;
+const sparks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#FF6A2B' }), JUMPS.length * SPARK_N);
+sparks.frustumCulled = false; glow(sparks, '#FF7A3C'); scene.add(sparks);
+const sparkSeeds = JUMPS.map((J, j) => {
+  const r = mulberry32(1000 + j * 77), big = J.flip ? 1.35 : 1;
+  return Array.from({ length: SPARK_N }, (_, i) => {
+    const a = (i / SPARK_N) * Math.PI * 2 + r() * 0.5, sp = (3.0 + r() * 2.4) * big;
+    return {
+      vx: Math.cos(a) * sp, vz: Math.sin(a) * sp * 0.8, vy: (2.6 + r() * 2.2) * big,
+      size: 0.075 + r() * 0.045, life: 0.55 + r() * 0.35,
+      ax: new THREE.Vector3(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), spin: 6 + r() * 10,
+    };
+  });
+});
+
+// ───────────────────────── stands + lights ─────────────────────────
+const metal = new THREE.MeshStandardMaterial({ color: '#2B2A28', roughness: 0.42, metalness: 0.55 });
+const rubber = new THREE.MeshStandardMaterial({ color: '#151514', roughness: 0.8 });
+function tripod(x, z, h) {
+  const g = new THREE.Group(); g.position.set(x, SLAB_TOP, z);
+  const hub = 0.78, rad = 0.36;
+  for (let i = 0; i < 3; i++) {
+    const a = Math.PI / 6 + i * Math.PI * 2 / 3;
+    const foot = new THREE.Vector3(Math.cos(a) * rad, 0.02, Math.sin(a) * rad), top = new THREE.Vector3(0, hub, 0);
+    const len = foot.distanceTo(top);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, len, 8), metal);
+    leg.position.copy(foot).add(top).multiplyScalar(0.5);
+    leg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().sub(foot).normalize());
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.03, 12), rubber);
+    pad.position.copy(foot).setY(0.015);
+    leg.castShadow = true; g.add(leg, pad);
+  }
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, h, 10), metal);
+  col.position.y = h / 2; col.castShadow = true;
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.09, 12), metal); collar.position.y = hub;
+  g.add(col, collar); scene.add(g);
+  return g;
+}
+function bar(a, b, r = 0.025) {
+  const len = a.distanceTo(b);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), metal);
+  m.position.copy(a).add(b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+  m.castShadow = true; scene.add(m); return m;
+}
+
+const C_KEY = kelvin(3200), C_RIM = kelvin(7500), C_TOP = kelvin(5000);
+const fixtures = [];   // { mat, glowMat, color, base, key }
+
+// key softbox — front right, 28° elevation
+const KEY_STAND = new THREE.Vector3(5.45, 0, 2.55), KEY_HEAD = new THREE.Vector3(5.45, 3.7, 3.3);
+const KEY_AIM = new THREE.Vector3(-1.2, 0.5, -0.5);
+tripod(KEY_STAND.x, KEY_STAND.z, 3.2);
+bar(new THREE.Vector3(KEY_STAND.x, 3.2, KEY_STAND.z), KEY_HEAD.clone().add(new THREE.Vector3(0, 0, 0)), 0.024);
+const keyHead = new THREE.Group(); keyHead.position.copy(KEY_HEAD); keyHead.lookAt(KEY_AIM); scene.add(keyHead);
+{
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.8, 0.7, 4, 1, true),
+    new THREE.MeshStandardMaterial({ color: '#1C1B1A', roughness: 0.9, side: THREE.DoubleSide }));
+  body.rotation.x = Math.PI / 2; body.rotation.y = Math.PI / 4; body.position.z = 0.1; body.castShadow = false;
+  const back = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.2), metal); back.position.z = -0.32;
+  const mat = new THREE.MeshStandardMaterial({ color: '#D6D2CA', roughness: 0.9, emissive: C_KEY.clone(), emissiveIntensity: 0 });
+  const diff = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), mat);
+  diff.position.z = 0.45; diff.rotation.z = 0;
+  const gm = glow(diff, C_KEY);
+  keyHead.add(body, back, diff);
+  fixtures.push({ mat, gm, color: C_KEY, k: 'key', emis: 1.15, bloom: 0.55 });
+}
+const key = new THREE.SpotLight(C_KEY, 0, 0, THREE.MathUtils.degToRad(40), 1, 1);
+key.position.copy(KEY_HEAD); key.target.position.copy(KEY_AIM);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 7; key.shadow.blurSamples = 16;
+key.shadow.bias = -0.0003; key.shadow.normalBias = 0.02; key.shadow.camera.near = 1; key.shadow.camera.far = 30;
+scene.add(key, key.target);
+
+// rim strip — back left, panel turned toward camera
+const RIM_STAND = new THREE.Vector3(-5.45, 0, -2.55);
+tripod(RIM_STAND.x, RIM_STAND.z, 0.95);
+const rimHead = new THREE.Group(); rimHead.position.set(RIM_STAND.x, 1.95, RIM_STAND.z); scene.add(rimHead);
+rimHead.rotation.y = THREE.MathUtils.degToRad(22);  // faces the camera, a touch toward the slab
+{
+  const frame = new THREE.Mesh(new RoundedBoxGeometry(0.44, 2.05, 0.16, 2, 0.04), new THREE.MeshStandardMaterial({ color: '#1C1B1A', roughness: 0.6 }));
+  frame.castShadow = true;
+  const mat = new THREE.MeshStandardMaterial({ color: '#C9CCD2', roughness: 0.6, emissive: C_RIM.clone(), emissiveIntensity: 0 });
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 1.92), mat); panel.position.z = 0.082;
+  const gm = glow(panel, C_RIM);
+  const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.02, 8, 24, Math.PI), metal);
+  yoke.rotation.z = Math.PI; yoke.position.y = -1.25;
+  rimHead.add(frame, panel);
+  fixtures.push({ mat, gm, color: C_RIM, k: 'rim', emis: 1.2, bloom: 0.75 });
+}
+const rim = new THREE.SpotLight(C_RIM, 0, 0, THREE.MathUtils.degToRad(40), 0.85, 1);
+rim.position.set(RIM_STAND.x + 0.3, 2.0, RIM_STAND.z + 0.3); rim.target.position.set(-0.6, 0.7, 0.4);
+scene.add(rim, rim.target);
+
+// top spot on a boom from the back-right corner, lamp at 5.8 above the flip
+const BOOM_STAND = new THREE.Vector3(5.45, 0, -2.55), LAMP = new THREE.Vector3(2.2, 5.8, -0.15);
+tripod(BOOM_STAND.x, BOOM_STAND.z, 6.45);
+{
+  const pivot = new THREE.Vector3(BOOM_STAND.x, 6.4, BOOM_STAND.z);
+  const tip = new THREE.Vector3(LAMP.x, 6.4, LAMP.z);
+  bar(pivot.clone().add(new THREE.Vector3(1.1, 0, -0.5)), tip, 0.03);
+  const cw = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), metal);
+  cw.position.copy(pivot).add(new THREE.Vector3(1.1, 0, -0.5)); scene.add(cw);
+  bar(tip, LAMP.clone().add(new THREE.Vector3(0, 0.3, 0)), 0.02);
+}
+const lamp = new THREE.Group(); lamp.position.copy(LAMP); scene.add(lamp);
+{
+  const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 0.52, 28), new THREE.MeshStandardMaterial({ color: '#1C1B1A', roughness: 0.45, metalness: 0.3 }));
+  housing.castShadow = true;
+  const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.022, 8, 28, Math.PI), metal);
+  yoke.position.y = 0.0; yoke.rotation.y = 0;
+  const lensMat = new THREE.MeshStandardMaterial({ color: '#8C8A86', roughness: 0.3, emissive: C_TOP.clone(), emissiveIntensity: 0 });
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.255, 32), lensMat);
+  lens.rotation.x = Math.PI / 2; lens.position.y = -0.262;
+  const rimMat = new THREE.MeshStandardMaterial({ color: '#3A3936', roughness: 0.4, emissive: C_TOP.clone(), emissiveIntensity: 0 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.03, 10, 40), rimMat);
+  ring.rotation.x = Math.PI / 2; ring.position.y = -0.27;
+  lamp.add(housing, yoke, lens, ring);
+  fixtures.push({ mat: lensMat, gm: glow(lens, C_TOP), color: C_TOP, k: 'top', emis: 1.0, bloom: 0.6 });
+  fixtures.push({ mat: rimMat, gm: glow(ring, C_TOP), color: C_TOP, k: 'top', emis: 1.6, bloom: 1.6 });
+}
+const top = new THREE.SpotLight(C_TOP, 0, 0, THREE.MathUtils.degToRad(17), 0.35, 2);  // 34° pool
+top.position.copy(LAMP).add(new THREE.Vector3(0, -0.28, 0)); top.target.position.set(LAMP.x, 0, LAMP.z);
+top.castShadow = true; top.shadow.mapSize.set(1024, 1024); top.shadow.radius = 4; top.shadow.bias = -0.0004;
+top.shadow.camera.near = 1; top.shadow.camera.far = 12;
+scene.add(top, top.target);
+
+// fill: low enough that lights-off sits near 50 %
+const hemi = new THREE.HemisphereLight(new THREE.Color('#FFFFFF'), new THREE.Color('#CFC9BF'), 0.75);
+scene.add(hemi);
+const LIGHT_I = { key: 22, rim: 22, top: 45 };
+
+// ───────────────────────── mascot (0.1 voxels) ─────────────────────────
+const V = 0.1;
+const voxGeo = new RoundedBoxGeometry(V * 0.965, V * 0.965, V * 0.965, 1, 0.014);
+const skin = new THREE.MeshPhysicalMaterial({ color: '#D97757', roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.35 });
+const eyeMat = new THREE.MeshPhysicalMaterial({ color: '#0F0F0F', roughness: 0.3, clearcoat: 0.6 });
+function voxels(nx, ny, nz, mat, ax = 0.5, ay = 0, az = 0.5, surface = true) {
+  const list = [];
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) for (let k = 0; k < nz; k++)
+    if (!surface || i === 0 || j === 0 || k === 0 || i === nx - 1 || j === ny - 1 || k === nz - 1) list.push([i, j, k]);
+  const m = new THREE.InstancedMesh(voxGeo, mat, list.length);
+  const ox = -nx * V * ax, oy = -ny * V * ay, oz = -nz * V * az;
+  list.forEach(([i, j, k], n) => {
+    dummy.position.set(ox + (i + 0.5) * V, oy + (j + 0.5) * V, oz + (k + 0.5) * V);
+    dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix(); m.setMatrixAt(n, dummy.matrix);
+  });
+  m.castShadow = m.receiveShadow = true;
+  return m;
+}
+const BW = 14 * V, BH = 10 * V, BD = 8 * V, LH = 3 * V;
+const mascot = new THREE.Group(); scene.add(mascot);          // at ground contact point
+const flipPivot = new THREE.Group(); mascot.add(flipPivot);   // rotates about the body centre
+const rig = new THREE.Group(); flipPivot.add(rig);
+const body = new THREE.Group(); rig.add(body);
+body.add(voxels(14, 10, 8, skin, 0.5, 0, 0.5));
+{ // dark core so seams never show daylight
+  const core = new THREE.Mesh(new THREE.BoxGeometry(BW - 0.04, BH - 0.04, BD - 0.04), new THREE.MeshBasicMaterial({ color: '#6E3423' }));
+  core.position.y = BH / 2; body.add(core);
+}
+const eyes = new THREE.Group(); body.add(eyes);
+const eyeL = voxels(2, 3, 1, eyeMat, 0.5, 0.5, 0.5, false), eyeR = voxels(2, 3, 1, eyeMat, 0.5, 0.5, 0.5, false);
+eyeL.position.set(-0.32, 0.64, BD / 2 - 0.035); eyeR.position.set(0.32, 0.64, BD / 2 - 0.035);
+eyes.add(eyeL, eyeR);
+const arms = [-1, 1].map(s => {
+  const p = new THREE.Group(); rig.add(p);
+  p.add(voxels(3, 2, 3, skin, s < 0 ? 1 : 0, 0.5, 0.5)); return { p, s };
+});
+const legs = [-0.6, -0.3, 0.3, 0.6].map(x => {
+  const p = new THREE.Group(); rig.add(p);
+  p.add(voxels(2, 3, 3, skin, 0.5, 1, 0)); return { p, x };
+});
+
+// ───────────────────────── post ─────────────────────────
+const rtOpts = { type: THREE.HalfFloatType, samples: 4 };
+const bloomComposer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(SIZE, SIZE, rtOpts));
+bloomComposer.renderToScreen = false;
+bloomComposer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(SIZE, SIZE), 1.05, 0.55, 0.0);
+bloomComposer.addPass(bloomPass);
+
+const finalComposer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(SIZE, SIZE, rtOpts));
+finalComposer.addPass(new RenderPass(scene, camera));
+const bokeh = new BokehPass(scene, camera, { focus: 40, aperture: 0.00035, maxblur: 0.0042 });
+finalComposer.addPass(bokeh);
+const mixPass = new ShaderPass(new THREE.ShaderMaterial({
+  uniforms: { baseTexture: { value: null }, bloomTexture: { value: bloomComposer.renderTarget2.texture } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `uniform sampler2D baseTexture, bloomTexture; varying vec2 vUv;
+    void main(){ gl_FragColor = texture2D(baseTexture, vUv) + vec4(texture2D(bloomTexture, vUv).rgb, 0.0); }`,
+}), 'baseTexture');
+finalComposer.addPass(mixPass);
+finalComposer.addPass(new OutputPass());
+const finishPass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uSeed: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uSeed; varying vec2 vUv;
+    float h(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031 + uSeed * 0.0137); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      c.rgb *= 1.0 - 0.10 * smoothstep(0.08, 0.55, dot(d, d) * 2.0);          // 10 % vignette
+      c.rgb += (h(gl_FragCoord.xy) - 0.5) * 0.04;                              // 2 % grain
+      c.rgb += (h(gl_FragCoord.xy + 71.3) + h(gl_FragCoord.xy + 13.7) - 1.0) / 255.0;   // triangular dither
+      gl_FragColor = vec4(c.rgb, 1.0);
+    }`,
+});
+finalComposer.addPass(finishPass);
+
+const black = new THREE.MeshBasicMaterial({ color: 0x000000 });
+const swapped = new Map();
+function renderBloom() {
+  scene.traverse(o => {
+    if (o.isMesh) { swapped.set(o, o.material); o.material = o.userData.glow && o.userData.glowOn ? o.userData.glow : black; }
+  });
+  const bg = scene.background; scene.background = null;
+  renderer.setClearColor(0x000000, 1);
+  bloomComposer.render();
+  scene.background = bg;
+  swapped.forEach((m, o) => { o.material = m; }); swapped.clear();
+}
+
+// ───────────────────────── frame update ─────────────────────────
+const rows = [...document.querySelectorAll('#labels .row')];
+const tmpV = new THREE.Vector3(), tmpC = new THREE.Color();
+function update(f) {
+  const lv = { key: lightLevel(f, ON.key), rim: lightLevel(f, ON.rim), top: lightLevel(f, ON.top) };
+  key.intensity = LIGHT_I.key * lv.key;
+  rim.intensity = LIGHT_I.rim * lv.rim;
+  top.intensity = LIGHT_I.top * lv.top;
+  for (const fx of fixtures) {
+    const l = lv[fx.k];
+    fx.mat.emissiveIntensity = fx.emis * l;
+    fx.gm.color.copy(fx.color).multiplyScalar(fx.bloom * l);
+  }
+  keyHead.children[2].userData.glowOn = lv.key > 0;
+  rimHead.children[1].userData.glowOn = lv.rim > 0;
+  lamp.children[2].userData.glowOn = lamp.children[3].userData.glowOn = lv.top > 0;
+
+  // labels
+  rows.forEach((r, i) => r.classList.toggle('on', f >= LABEL_ON[i] && f < OFF));
+
+  // diamonds: lit on landing (diamond 1 by the flip), snap off at 468
+  diamonds.forEach((d, i) => {
+    let litAt = Infinity;
+    for (const J of JUMPS) if (J.dia === i) litAt = Math.min(litAt, J.land);
+    const lit = f >= litAt && f < OFF;
+    d.top.material = lit ? diaLit : diaWhite;
+    d.top.userData.glowOn = lit;
+    const pop = lit ? 1 + 0.35 * Math.exp(-(f - litAt) / 5) * (f - litAt < 1 ? 0 : 1) : 1;
+    d.g.scale.setScalar(lit ? lerp(1, pop, 1) : 1);
+    d.light.intensity = lit ? 0.42 * (1 + 1.5 * Math.exp(-(f - litAt) / 10)) : 0;
+    if (lit) d.top.userData.glow.color.set('#FF6A2B').multiplyScalar(0.55 + 0.9 * Math.exp(-(f - litAt) / 10));
+  });
+
+  // cells ripple 0.08 from each landing
+  for (let n = 0; n < cellPos.length; n++) {
+    const [cx, cz] = cellPos[n]; let h = 0;
+    for (const J of JUMPS) {
+      const tau = (f - J.land) / FPS;
+      if (tau < 0 || tau > 1.4) continue;
+      const r = Math.hypot(cx - J.x1, cz), front = tau * 5.2;
+      h += 0.08 * Math.exp(-tau * 2.6) * Math.exp(-((r - front) ** 2) / (2 * 0.28 * 0.28)) * (J.flip ? 1.15 : 1);
+    }
+    dummy.position.set(cx, SLAB_TOP + 0.02 + h, cz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
+    cells.setMatrixAt(n, dummy.matrix);
+  }
+  cells.instanceMatrix.needsUpdate = true;
+
+  // playhead
+  playhead.position.x = playheadX(f);
+  playhead.children.forEach(c => { if (c.userData.glow) c.userData.glowOn = true; });
+
+  // mascot
+  const bp = basePos(f), { sx, sy } = bodyScale(f), ls = legState(f), droop = armDroop(f), look = eyeLook(f);
+  mascot.position.set(bp.x, GROUND + bp.y, 0);
+  const legTop = LH * ls.sy, pivotY = legTop + BH * sy * 0.5;
+  flipPivot.position.y = pivotY; rig.position.y = -pivotY;
+  flipPivot.rotation.z = flipAngle(f);
+  body.position.y = legTop; body.scale.set(sx, sy, sx);
+  eyes.position.set(look.dx / sx, look.dy / sy, 0);
+  const bl = blink(f); eyeL.scale.y = eyeR.scale.y = bl;
+  arms.forEach(({ p, s }) => {
+    p.position.set(s * (BW / 2) * sx, legTop + BH * sy * 0.42, 0);
+    p.rotation.z = -s * droop;
+  });
+  legs.forEach(({ p, x }) => {
+    p.position.set(x * sx, legTop, BD / 2 * sx - 3 * V);
+    p.rotation.z = ls.rot; p.scale.set(1, ls.sy, 1);
+  });
+
+  // dotted arc: draws in 303-318, eaten by the flip as it passes
+  const J5 = JUMPS[4];
+  const fu = f >= J5.to && f < J5.land ? (f - J5.to) / (J5.land - J5.to) : f >= J5.land ? 2 : -1;
+  for (let i = 0; i < ARC.dots; i++) {
+    const u = i / (ARC.dots - 1), fi = ARC.f0 + (ARC.f1 - ARC.f0) * u;
+    let s = smooth((f - fi) / 3) * (f < J5.land + 10 ? 1 : 0);
+    if (fu > u - 0.02) s = 0;
+    const p = arcPoint(u);
+    dummy.position.copy(p); dummy.rotation.set(0, 0, Math.PI / 4); dummy.scale.setScalar(Math.max(s, 1e-4) * (1 + 0.6 * Math.exp(-Math.max(0, f - fi) / 3)));
+    dummy.updateMatrix(); arcDots.setMatrixAt(i, dummy.matrix);
+  }
+  arcDots.instanceMatrix.needsUpdate = true;
+
+  // sparks
+  let anySpark = false;
+  JUMPS.forEach((J, j) => {
+    sparkSeeds[j].forEach((s, i) => {
+      const tau = (f - J.land) / FPS, n = j * SPARK_N + i;
+      if (tau < 0 || tau > s.life) { dummy.scale.setScalar(1e-4); dummy.position.set(0, -10, 0); }
+      else {
+        anySpark = true;
+        const y = 0.05 + s.vy * tau - 0.5 * 13 * tau * tau;
+        const r0 = 0.62 / Math.hypot(s.vx, s.vz);          // thrown from the feet, outside the body
+        dummy.position.set(J.x1 + s.vx * (tau + r0), Math.max(s.size / 2 + 0.02, y), s.vz * (tau + r0));
+        dummy.quaternion.setFromAxisAngle(s.ax, s.spin * tau);
+        dummy.scale.setScalar(s.size * (1 - Math.pow(tau / s.life, 3)));
+      }
+      dummy.updateMatrix(); sparks.setMatrixAt(n, dummy.matrix);
+      dummy.quaternion.identity();
+    });
+  });
+  sparks.instanceMatrix.needsUpdate = true;
+  sparks.userData.glowOn = anySpark;
+
+  // camera: FOV 18, 30° elevation, ±10° orbit, 25 % push tracking hops at 45 %, 4 % punch on flip landing
+  const az = THREE.MathUtils.degToRad(10) * Math.sin((f / FRAMES) * Math.PI * 2);
+  const el = THREE.MathUtils.degToRad(30);
+  const p = pushIn(f);
+  const dist = 44 * (1 - 0.25 * p) * (1 - 0.04 * punchIn(f));
+  const target = new THREE.Vector3(0.2 + 0.45 * trackX(f) * p, lerp(1.25, 1.7, p), lerp(-0.2, 0, p));
+  camera.position.set(target.x + dist * Math.sin(az) * Math.cos(el), target.y + dist * Math.sin(el), target.z + dist * Math.cos(az) * Math.cos(el));
+  camera.lookAt(target);
+  camera.updateMatrixWorld();
+
+  // depth of field focused on the mascot
+  tmpV.set(bp.x, GROUND + bp.y + 0.8, 0);
+  bokeh.uniforms.focus.value = camera.position.distanceTo(tmpV);
+  finishPass.uniforms.uSeed.value = Math.floor(f) % FRAMES;
+
+  // fill bounce: each light lifts the room a little so the click reads on the backdrop
+  hemi.intensity = 0.75 + 0.22 * lv.key + 0.08 * lv.rim + 0.06 * lv.top;
+  cycMat.emissiveIntensity = 0.30 * lv.key + 0.12 * lv.rim + 0.10 * lv.top;
+}
+
+function render() {
+  renderBloom();
+  renderer.setClearColor(scene.background, 1);
+  finalComposer.render();
+}
+
+window.renderAt = (t) => { update(wrap(t * FPS)); render(); };
+window.FRAMES = FRAMES; window.FPS = FPS;
+
+// ───────────────────────── score (Web Audio, synthesized) ─────────────────────────
+// 120 BPM, 4 bars, F major. Every hit lands one frame after its visual event.
+// Rendered as two loops; the second loop (with tails from the first) is the seamless 8 s file.
+window.renderAudio = async function (sampleRate = 48000) {
+  const LOOP = 8, CYCLES = 2;
+  const ctx = new OfflineAudioContext(2, sampleRate * LOOP * CYCLES, sampleRate);
+  const rnd = mulberry32(4242);
+  const fr = n => (n + 1) / FPS;                    // +1 frame
+  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  const master = ctx.createGain(); master.gain.value = 0.9;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 8; comp.ratio.value = 3.5; comp.attack.value = 0.004; comp.release.value = 0.18;
+  master.connect(comp).connect(ctx.destination);
+  // generated stereo room
+  const ir = ctx.createBuffer(2, sampleRate * 2.2, sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch), r = mulberry32(9 + ch);
+    for (let i = 0; i < d.length; i++) { const t = i / sampleRate; d[i] = (r() * 2 - 1) * Math.exp(-t * 3.1) * (t < 0.012 ? t / 0.012 : 1); }
+  }
+  const verb = ctx.createConvolver(); verb.buffer = ir;
+  const verbIn = ctx.createGain(); verbIn.gain.value = 0.22;
+  const verbHp = ctx.createBiquadFilter(); verbHp.type = 'highpass'; verbHp.frequency.value = 280;
+  verbIn.connect(verbHp).connect(verb).connect(master);
+
+  const noise = ctx.createBuffer(1, sampleRate * 2, sampleRate);
+  { const d = noise.getChannelData(0), r = mulberry32(77); for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1; }
+  function out(node, pan = 0, send = 0.2) {
+    const p = ctx.createStereoPanner(); p.pan.value = clamp(pan, -0.9, 0.9);
+    node.connect(p); p.connect(master);
+    if (send > 0) { const s = ctx.createGain(); s.gain.value = send; p.connect(s).connect(verbIn); }
+    return p;
+  }
+  const panX = x => clamp(x / 7, -0.75, 0.75);
+  function env(g, t, a, peak, d, sustain = 0) {
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a);
+    g.gain.setTargetAtTime(sustain, t + a, d / 3);
+  }
+  function noiseSrc(t, dur) { const s = ctx.createBufferSource(); s.buffer = noise; s.loop = true; s.start(t, rnd() * 1.5); s.stop(t + dur + 0.05); return s; }
+  function tone(type, f0, t, dur) { const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); o.start(t); o.stop(t + dur + 0.05); return o; }
+
+  const T0s = [];
+  for (let c = 0; c < CYCLES; c++) T0s.push(c * LOOP);
+
+  for (const T0 of T0s) {
+    const at = n => T0 + fr(n);
+
+    // ── pad bed: each voice follows its light, incl. the 3-frame flicker ──
+    const padVoices = [[57, 'key', -0.15], [64, 'key', 0.15], [72, 'top', 0.0], [79, 'rim', -0.45]];
+    for (const [m, lk, pan] of padVoices) {
+      const g = ctx.createGain(); g.gain.value = 0;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = m > 70 ? 2600 : 1500; lp.Q.value = 0.4;
+      const mix = ctx.createGain(); mix.gain.value = m > 70 ? 0.042 : 0.06;
+      [-7, 0, 7].forEach((det, i) => {
+        const o = tone(i === 1 ? 'triangle' : 'sawtooth', hz(m), T0, LOOP); o.detune.value = det;
+        const og = ctx.createGain(); og.gain.value = i === 1 ? 1 : 0.35; o.connect(og).connect(lp);
+      });
+      lp.connect(g).connect(mix); out(mix, pan, 0.55);
+      const on = ON[lk];
+      g.gain.setValueAtTime(0, T0);
+      for (let k = 0; k < 4; k++) g.gain.setTargetAtTime(lightLevel(on + k, on), at(on + k), 0.004);
+      g.gain.setTargetAtTime(0, at(OFF), 0.006);
+    }
+
+    // ── shaker 8ths from 45, kick + bass from 60; rest 330-420 ──
+    for (let n = 45; n < OFF; n += 15) {
+      if (n >= 330 && n < 420) continue;
+      const t = at(n), s = noiseSrc(t, 0.09), hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 6500;
+      const g = ctx.createGain(); env(g, t, 0.003, (n % 30 === 15) ? 0.11 : 0.06, 0.05);
+      s.connect(hp).connect(g); out(g, (n % 30 === 15) ? 0.25 : -0.2, 0.08);
+    }
+    for (let n = 60; n < OFF; n += 30) {
+      if (n >= 330 && n < 420) continue;
+      const t = at(n), o = tone('sine', 150, t, 0.4);
+      o.frequency.exponentialRampToValueAtTime(44, t + 0.12);
+      const g = ctx.createGain(); env(g, t, 0.002, 0.95, 0.32);
+      o.connect(g); out(g, 0, 0);
+      const c = noiseSrc(t, 0.02), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3000;
+      const cg = ctx.createGain(); env(cg, t, 0.001, 0.12, 0.012); c.connect(bp).connect(cg); out(cg, 0, 0);
+    }
+    const rootAt = n => n < 120 ? 41 : n < 240 ? 38 : n < 360 ? 34 : 41;   // F2 D2 Bb1 F2
+    function bass(t, m, dur, peak = 0.32) {
+      const o = tone('sawtooth', hz(m), t, dur), sub = tone('sine', hz(m), t, dur);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 3;
+      lp.frequency.setValueAtTime(900, t); lp.frequency.setTargetAtTime(220, t, 0.06);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + 0.006);
+      g.gain.setTargetAtTime(peak * 0.6, t + 0.01, 0.08); g.gain.setTargetAtTime(0, t + dur, 0.03);
+      const sg = ctx.createGain(); sg.gain.value = 0.9;
+      o.connect(lp).connect(g); sub.connect(sg).connect(g); out(g, 0, 0.02);
+    }
+    for (let n = 60; n < 330; n += 15) bass(at(n), rootAt(n) + ((n % 30 === 15) ? 12 : 0), 0.11);
+    bass(at(330), 36, (384 - 330) / FPS - 0.01, 0.3);        // hold C under the flip
+    bass(at(384), 41, (OFF - 384) / FPS - 0.02, 0.34);       // F on the landing
+
+    // ── light clicks ──
+    for (const [n, x, big] of [[ON.key, 5.7, 0], [ON.rim, -5.4, 0], [ON.top, 0.5, 0], [OFF, 0, 1]]) {
+      const t = at(n), c = noiseSrc(t, 0.05), bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = big ? 1800 : 3200; bp.Q.value = 1.6;
+      const g = ctx.createGain(); env(g, t, 0.0008, big ? 0.7 : 0.55, big ? 0.05 : 0.025);
+      c.connect(bp).connect(g); out(g, big ? 0 : panX(x), 0.3);
+      const o = tone('square', big ? 140 : 210, t, 0.05), og = ctx.createGain(); env(og, t, 0.001, 0.12, 0.03);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+      o.connect(lp).connect(og); out(og, big ? 0 : panX(x), 0.1);
+    }
+
+    // ── crouches: creak + inhale riser ──
+    for (const J of JUMPS) {
+      const t = at(J.c0), dur = (J.to - J.c0) / FPS, x = panX(J.x0);
+      const o = tone('sawtooth', 92, t, 0.24), fm = tone('sine', 31, t, 0.24), fmg = ctx.createGain(); fmg.gain.value = 26;
+      fm.connect(fmg).connect(o.frequency);
+      o.frequency.linearRampToValueAtTime(J.flip ? 70 : 82, t + 0.22);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 820; bp.Q.value = 5;
+      const g = ctx.createGain(); env(g, t, 0.01, J.flip ? 0.2 : 0.15, 0.2);
+      o.connect(bp).connect(g); out(g, x, 0.25);
+      const n = noiseSrc(t, dur + 0.02), nb = ctx.createBiquadFilter(); nb.type = 'bandpass'; nb.Q.value = 3;
+      nb.frequency.setValueAtTime(500, t); nb.frequency.exponentialRampToValueAtTime(J.flip ? 3400 : 2600, t + dur);
+      const ng = ctx.createGain(); ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(J.flip ? 0.2 : 0.14, t + dur);
+      ng.gain.linearRampToValueAtTime(0, t + dur + 0.02);
+      n.connect(nb).connect(ng); out(ng, x, 0.3);
+    }
+    // ── takeoffs: upward swish ──
+    for (const J of JUMPS) {
+      const t = at(J.to), dur = J.flip ? 0.3 : 0.22;
+      const n = noiseSrc(t, dur), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.2;
+      bp.frequency.setValueAtTime(700, t); bp.frequency.exponentialRampToValueAtTime(5200, t + dur);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.32, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      n.connect(bp).connect(g); out(g, panX(lerp(J.x0, J.x1, 0.3)), 0.3);
+    }
+    // ── landings: rubber squash pitched by the squash scale + spark tings ──
+    const tingNotes = [89, 93, 96, 98, 100, 101];             // F6 A6 C7 D7 E7 F7
+    for (const J of JUMPS) {
+      const t = at(J.land), big = J.flip ? 1.45 : 1, x = panX(J.x1);
+      const f0 = 330 * J.squash[1];                          // squash y scale drives pitch
+      const o = tone('sine', f0 * 1.6, t, 0.5);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.55, t + 0.09);
+      o.frequency.setTargetAtTime(f0 * 0.75, t + 0.09, 0.05);
+      const wob = tone('sine', 3.0, t, 0.5), wg = ctx.createGain(); wg.gain.value = f0 * 0.08; wob.connect(wg).connect(o.frequency);
+      const g = ctx.createGain(); env(g, t, 0.002, 0.55 * big, 0.26 * big);
+      const ws = ctx.createWaveShaper(); { const c = new Float32Array(1024); for (let i = 0; i < 1024; i++) { const v = i / 511.5 - 1; c[i] = Math.tanh(v * 2.2); } ws.curve = c; }
+      o.connect(ws).connect(g); out(g, x, 0.18);
+      const th = noiseSrc(t, 0.12), lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+      const tg = ctx.createGain(); env(tg, t, 0.001, 0.6 * big, 0.08); th.connect(lp).connect(tg); out(tg, x, 0.1);
+      if (J.flip) { const sub = tone('sine', 55, t, 0.6), sg = ctx.createGain(); env(sg, t, 0.003, 0.55, 0.45); sub.frequency.exponentialRampToValueAtTime(38, t + 0.4); sub.connect(sg).connect(master); }
+      const j = JUMPS.indexOf(J);
+      sparkSeeds[j].forEach((s, i) => {
+        const tt = t + 0.012 + i * 0.016 + rnd() * 0.02;
+        const m = tingNotes[Math.floor(rnd() * tingNotes.length)];
+        const a = tone('sine', hz(m), tt, 0.5), b = tone('sine', hz(m) * 2.76, tt, 0.3);
+        const ag = ctx.createGain(); env(ag, tt, 0.001, 0.05 * big, 0.28);
+        const bg = ctx.createGain(); env(bg, tt, 0.001, 0.018 * big, 0.12);
+        a.connect(ag); b.connect(bg); const mx = ctx.createGain(); ag.connect(mx); bg.connect(mx);
+        out(mx, panX(J.x1 + s.vx * 0.3), 0.5);
+      });
+    }
+    // ── label pings A5 C6 D6 F6 A6 ──
+    [81, 84, 86, 89, 93].forEach((m, i) => {
+      const t = at(LABEL_ON[i]);
+      const a = tone('sine', hz(m), t, 1.2), b = tone('sine', hz(m) * 4, t, 0.4), c = tone('triangle', hz(m) * 2, t, 0.6);
+      const ag = ctx.createGain(); env(ag, t, 0.002, 0.16, 0.9);
+      const bg = ctx.createGain(); env(bg, t, 0.001, 0.025, 0.15);
+      const cg = ctx.createGain(); env(cg, t, 0.002, 0.03, 0.35);
+      const mx = ctx.createGain(); a.connect(ag).connect(mx); b.connect(bg).connect(mx); c.connect(cg).connect(mx);
+      out(mx, -0.55, 0.45);
+    });
+    // ── dot ticks 303-318 ──
+    for (let k = 0; k <= 7; k++) {
+      const n = ARC.f0 + Math.round(k * (ARC.f1 - ARC.f0) / 7), t = at(n);
+      const o = tone('sine', 2600 + k * 90, t, 0.03), g = ctx.createGain(); env(g, t, 0.0005, 0.12, 0.012);
+      o.connect(g); out(g, panX(lerp(4, -4, k / 7)), 0.2);
+    }
+    // ── flip whoosh 330-384, travels right to left ──
+    {
+      const J = JUMPS[4], t = at(J.to), dur = (J.land - J.to) / FPS;
+      const n = noiseSrc(t, dur), bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4;
+      bp.frequency.setValueAtTime(380, t); bp.frequency.exponentialRampToValueAtTime(2200, t + dur * 0.5); bp.frequency.exponentialRampToValueAtTime(520, t + dur);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.42, t + dur * 0.5);
+      g.gain.exponentialRampToValueAtTime(0.02, t + dur);
+      const am = tone('sine', 1 / dur * 1.0, t, dur), amg = ctx.createGain(); amg.gain.value = 0.12; am.connect(amg).connect(g.gain);
+      const p = ctx.createStereoPanner(); p.pan.setValueAtTime(panX(4), t); p.pan.linearRampToValueAtTime(panX(-4), t + dur);
+      n.connect(bp).connect(g).connect(p); p.connect(master); const s = ctx.createGain(); s.gain.value = 0.3; p.connect(s).connect(verbIn);
+    }
+    // ── blink blip 432 ──
+    {
+      const t = at(432), o = tone('sine', 1500, t, 0.08); o.frequency.exponentialRampToValueAtTime(2300, t + 0.05);
+      const g = ctx.createGain(); env(g, t, 0.002, 0.1, 0.04); o.connect(g); out(g, panX(-4), 0.3);
+    }
+  }
+
+  const buf = await ctx.startRendering();
+  const s0 = sampleRate * LOOP * (CYCLES - 1), n = sampleRate * LOOP;
+  return [0, 1].map(ch => Array.from(buf.getChannelData(ch).subarray(s0, s0 + n)));
+};
+
+// ───────────────────────── boot ─────────────────────────
+window.ready = (async () => {
+  await document.fonts.load('500 92px "Geist Mono"');
+  await document.fonts.load('500 28px "Geist Mono"');
+  await document.fonts.ready;
+  rulerNumbers();
+  window.renderAt(0);
+  return true;
+})();
+
+// live preview when opened directly (click for sound)
+if (!new URLSearchParams(location.search).has('render')) {
+  window.ready.then(() => {
+    let start = performance.now(), audio = null;
+    const loop = now => { window.renderAt(((now - start) / 1000) % 8); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+    stage.addEventListener('click', async () => {
+      if (audio) return;
+      const ac = new AudioContext({ sampleRate: 48000 });
+      const [L, R] = await window.renderAudio(48000);
+      const b = ac.createBuffer(2, L.length, 48000); b.copyToChannel(Float32Array.from(L), 0); b.copyToChannel(Float32Array.from(R), 1);
+      audio = ac.createBufferSource(); audio.buffer = b; audio.loop = true; audio.connect(ac.destination);
+      audio.start(); start = performance.now();
+    });
+  });
+}
+</script>
+</body>
+</html>
