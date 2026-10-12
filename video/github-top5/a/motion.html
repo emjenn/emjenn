@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GitHub Top 5 A</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option A: "Trending" - countdown #5 -> #1 as GitHub-style repo cards that get starred.
+const ORDER = [4, 3, 2, 1, 0]; // slot -> repo index (countdown)
+
+// contribution-graph texture
+function contribGrid(t, alpha) {
+  if (alpha <= 0) return;
+  const cols = 53, rows = 7, cell = 30, gap = 6, gw = cols * (cell + gap), x0 = (W - gw) / 2, y0 = H - rows * (cell + gap) - 70;
+  const pk = pulseAt(t, 6);
+  ctx.save(); ctx.globalAlpha = alpha;
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+    const on = prog(t, 0.6 + (c + r) * 0.012, 0.9 + (c + r) * 0.012);
+    if (on <= 0) continue;
+    const lvl = Math.floor(hash(c * 7 + r + Math.floor(t * 2) * 0.0001) * 5);
+    const wave = Math.max(0, 1 - Math.abs(c - ((t * 18) % 70 - 8)) / 4);
+    const v = [0.05, 0.14, 0.28, 0.5, 0.85][lvl] * on + wave * 0.35 + pk * 0.05 * (lvl > 2);
+    ctx.fillStyle = `rgba(255,255,255,${clamp(v)})`; roundRect(x0 + c * (cell + gap), y0 + r * (cell + gap), cell, cell, 6); ctx.fill();
+  }
+  ctx.restore();
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, 300, 0, W / 2, 300, 1100);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 5) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  contribGrid(t, t < T_DROP ? 0.9 : t < T_R0 ? 0.35 : t < T_OUT ? 0.22 : 0.45);
+}
+function bookIcon(x, y, s, col) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 24, s / 24); ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.lineJoin = 'round';
+  roundRect(3, 2, 18, 20, 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(7, 2); ctx.lineTo(7, 22); ctx.stroke(); ctx.restore();
+}
+function cursorArrow(x, y, s = 1, press = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s * (1 - press * 0.15), s * (1 - press * 0.15));
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 34); ctx.lineTo(9, 26); ctx.lineTo(15, 40); ctx.lineTo(21, 37); ctx.lineTo(15, 24); ctx.lineTo(26, 24); ctx.closePath();
+  ctx.fillStyle = C.white; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.restore();
+}
+
+function intro(t) {
+  const p = prog(t, 0.05, 0.6);
+  ctx.save(); ctx.strokeStyle = C.white; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(W / 2, 400, 150, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * eOutCubic(p)); ctx.stroke(); ctx.restore();
+  ghMark(W / 2, 400, 260 * eOutBack(prog(t, 0.35, 0.8), 1.8), C.white);
+  font('600 30px JBM'); txt(typed('github.com/trending?since=weekly', prog(t, 0.8, 1.6)), W / 2, 660, C.g1, 'center');
+}
+function headline(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  font('400px IDBlack'); const p = prog(u, 0, 0.25);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 520); const s = lerp(1.7, 1, eOutExpo(p)); ctx.scale(s, s); txt('TOP 5', 0, 0, C.white, 'center'); ctx.restore(); }
+  font('120px IDBlack'); const p2 = prog(u, 0.45, 0.7);
+  if (p2 > 0) { ctx.save(); ctx.globalAlpha *= eOutCubic(p2); ctx.strokeStyle = C.white; ctx.lineWidth = 3; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.strokeText('GITHUB REPOS', W / 2, 670 + (1 - eOutExpo(p2)) * 50); ctx.restore(); }
+  // week strip
+  const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  days.forEach((d, k) => { const q = prog(u, 0.8 + k * 0.05, 1.0 + k * 0.05); if (q <= 0) return; const x = W / 2 - 3 * 70 + k * 70; ctx.save(); ctx.globalAlpha *= q; roundRect(x - 26, 720, 52, 52, 10); ctx.fillStyle = `rgba(255,255,255,${0.15 + k * 0.12})`; ctx.fill(); font('600 22px JBM'); txt(d, x, 754, k > 3 ? '#000' : C.white, 'center'); ctx.restore(); });
+  font('600 28px JBM'); txt(typed('THIS WEEK', prog(u, 1.2, 1.5)), W / 2, 830, C.g1, 'center');
+  ctx.restore();
+}
+function slot(t) {
+  const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), u = t - SLOT_T(si), r = REPOS[ORDER[si]];
+  // big rank: outline that fills
+  font('560px IDBlack');
+  const rp = prog(u, 0, 0.2), fill = eInOutCubic(prog(u, 0.15, 0.5));
+  ctx.save(); ctx.translate(380, 760); const s = lerp(1.4, 1, eOutExpo(rp)); ctx.scale(s, s);
+  ctx.strokeStyle = C.white; ctx.lineWidth = 4; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.strokeText(String(r.rank), 0, 0);
+  ctx.beginPath(); ctx.rect(-300, -420 + 440 * (1 - fill), 600, 440 * fill + 60); ctx.clip(); txt(String(r.rank), 0, 0, C.white, 'center');
+  ctx.restore();
+  font('600 48px JBM'); txt('#', 150, 420, C.g2);
+  // repo card
+  const cp = eOutExpo(prog(u, 0.08, 0.4)), x = 760 + (1 - cp) * 300, y = 300, w = 1060, h = 460;
+  ctx.save(); ctx.globalAlpha = clamp(cp * 2);
+  roundRect(x, y, w, h, 22); ctx.fillStyle = '#0D1117'; ctx.fill(); ctx.strokeStyle = C.g3; ctx.lineWidth = 2; ctx.stroke();
+  bookIcon(x + 50, y + 62, 40, C.g1);
+  font('600 26px JBM'); txt(r.owner + ' /', x + 110, y + 92, C.g1);
+  const ns = fit(r.name, 'IDBlack', 76, w - 120, 40);
+  maskRise(r.name, x + 50, y + 200, prog(u, 0.15, 0.4), C.white, ns);
+  font('400 26px JBM'); txt(typed('↳ ' + r.url, prog(u, 0.25, 0.7)), x + 50, y + 270, C.g2);
+  // pills
+  font('600 22px JBM');
+  roundRect(x + 50, y + 320, 250, 50, 25); ctx.strokeStyle = C.g3; ctx.stroke(); txt('↗ trending', x + 80, y + 353, C.g1);
+  roundRect(x + 320, y + 320, 230, 50, 25); ctx.stroke(); txt(`#${r.rank} this week`, x + 345, y + 353, C.g1);
+  // star button + cursor click
+  const bx = x + w - 260, by = y + 315, starred = u > 0.85;
+  roundRect(bx, by, 210, 60, 12); ctx.fillStyle = starred ? C.white : '#21262D'; ctx.fill(); ctx.strokeStyle = C.g3; ctx.stroke();
+  font('600 26px JBM'); txt(starred ? '★ Starred' : '☆ Star', bx + 105, by + 40, starred ? '#000' : C.white, 'center');
+  if (starred) { const bp = prog(u, 0.85, 1.2); ctx.strokeStyle = `rgba(255,255,255,${1 - bp})`; ctx.lineWidth = 3; roundRect(bx - 20 * bp, by - 20 * bp, 210 + 40 * bp, 60 + 40 * bp, 14); ctx.stroke(); }
+  const mp = eInOutCubic(prog(u, 0.35, 0.8)), cx = lerp(x + w - 40, bx + 130, mp), cy = lerp(y + h + 120, by + 38, mp);
+  cursorArrow(cx, cy, 1.2, prog(u, 0.8, 0.88) * (1 - prog(u, 0.9, 1.0)));
+  ctx.restore();
+  // countdown pips
+  for (let k = 0; k < N; k++) { ctx.fillStyle = k <= si ? C.white : C.g3; roundRect(760 + k * 56, 220, 44, 8, 4); ctx.fill(); }
+  font('600 22px JBM'); txt('COUNTDOWN', 760 + 5 * 56 + 20, 230, C.g2);
+}
+function recap(t) {
+  const u = t - T_RECAP;
+  font('600 26px JBM'); txt('TOP 5 · THIS WEEK ON GITHUB', 160, 190, C.g1);
+  ghMark(W - 200, 175, 70, C.white, eOutCubic(prog(u, 0, 0.3)));
+  REPOS.forEach((r, k) => {
+    const p = prog(u, 0.05 + k * 0.07, 0.3 + k * 0.07); if (p <= 0) return;
+    const y = 320 + k * 130;
+    ctx.save(); ctx.globalAlpha = eOutCubic(p); ctx.translate((1 - eOutExpo(p)) * -80, 0);
+    ctx.fillStyle = k === 0 ? C.white : 'rgba(255,255,255,0.06)'; roundRect(160, y - 70, W - 320, 108, 16); ctx.fill();
+    const fg = k === 0 ? '#000' : C.white;
+    font('80px IDBlack'); txt(String(r.rank), 220, y + 10, fg, 'center');
+    font('600 24px JBM'); txt(r.owner + ' /', 300, y - 22, k === 0 ? '#333' : C.g2);
+    font('52px IDBlack'); txt(r.name, 300, y + 26, fg);
+    font('400 24px JBM'); txt(r.url, W - 200, y + 10, k === 0 ? '#333' : C.g2, 'right');
+    ctx.restore();
+  });
+}
+function outro(t) {
+  const u = t - T_OUT;
+  ghMark(W / 2, 340, 220 * eOutBack(prog(u, 0, 0.4), 2), C.white);
+  font('150px IDBlack'); const p = prog(u, 0.25, 0.5);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 680); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('STAR. FORK. SHIP.', 0, 0, C.white, 'center'); ctx.restore(); }
+  font('italic 60px NR'); maskRise('save this before monday’s list drops', W / 2, 780, prog(u, 0.55, 0.85), C.g1, 60, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.85, 1.25)), W / 2, 870, C.white, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  for (let i = 0; i < N; i++) if (t >= SLOT_T(i)) shake = Math.max(shake, 0.4 * Math.exp(-(t - SLOT_T(i)) * 12));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 24 * shake, (hash(frame + 5) - 0.5) * 24 * shake);
+  if (t < T_DROP) intro(t); else if (t < T_R0) headline(t); else if (t < T_RECAP) slot(t); else if (t < T_OUT) recap(t); else outro(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.6], [T_RECAP, '255,255,255', 0.35], [T_OUT, '255,255,255', 0.6]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

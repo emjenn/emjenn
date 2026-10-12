@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GitHub Top 5 B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Git Graph" - each repo is a branch that forks off main, commits, and merges back.
+const tmp = document.createElement('canvas'); tmp.width = W; tmp.height = H; const tctx = tmp.getContext('2d');
+const MAIN_Y = 560, FORK0 = 1500, STEP = 1400, SPAN = 1100, AMP = 260;
+const forkX = i => FORK0 + i * STEP;
+const HEX = REPOS.map((_, i) => Array.from({ length: 7 }, (_, k) => '0123456789abcdef'[Math.floor(hash(i * 13 + k) * 16)]).join(''));
+
+function camAt(t) {
+  const tgt = i => forkX(i) + SPAN / 2;
+  if (t < T_R0 - 0.35) return { x: 960 + Math.max(0, t - T_DROP) * 60, y: 540, z: 1 };
+  if (t < T_RECAP) {
+    const i = clamp(Math.floor((t - (T_R0 - 0.35)) / R_DUR), 0, N - 1), t0 = SLOT_T(i) - 0.35;
+    const ty = j => MAIN_Y + (j % 2 ? 1 : -1) * AMP * 0.55;
+    const from = i === 0 ? { x: 960 + (T_R0 - 0.35 - T_DROP) * 60, y: 540, z: 1 } : { x: tgt(i - 1), y: ty(i - 1), z: 1.2 };
+    const p = eInOutCubic(prog(t, t0, t0 + 0.5));
+    return { x: lerp(from.x, tgt(i), p), y: lerp(from.y, ty(i), p), z: lerp(from.z, 1.2, p) * (1 - 0.15 * Math.sin(Math.PI * p)) };
+  }
+  const p = eInOutCubic(prog(t, T_RECAP, T_RECAP + 0.6)), endX = forkX(N - 1) + SPAN + 300, midX = endX / 2;
+  return { x: lerp(tgt(N - 1), midX, p), y: lerp(MAIN_Y + AMP * 0.55, 900, p), z: lerp(1.2, (W - 160) / endX, p) };
+}
+// branch progress for repo i (0..1 over its slot)
+const bp = (t, i) => prog(t, SLOT_T(i) - 0.05, SLOT_T(i) + R_DUR - 0.15);
+
+function branchPath(i) {
+  const fx = forkX(i), dir = i % 2 ? 1 : -1, by = MAIN_Y + dir * AMP;
+  const pts = [];
+  for (let k = 0; k <= 60; k++) { const s = k / 60, x = fx + s * SPAN; let y;
+    if (s < 0.2) y = MAIN_Y + (by - MAIN_Y) * eInOutCubic(s / 0.2);
+    else if (s > 0.8) y = by + (MAIN_Y - by) * eInOutCubic((s - 0.8) / 0.2);
+    else y = by;
+    pts.push([x, y]); }
+  return { pts, by, dir };
+}
+function drawPartial(pts, p, col, lw) {
+  if (p <= 0) return;
+  const n = Math.max(1, Math.floor(p * (pts.length - 1)));
+  ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let k = 1; k <= n; k++) ctx.lineTo(pts[k][0], pts[k][1]); ctx.stroke();
+  return pts[n];
+}
+function node(x, y, r, filled = true, ring = 0) {
+  ctx.fillStyle = filled ? C.white : '#000'; ctx.strokeStyle = C.white; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill(); ctx.stroke();
+  if (ring > 0) { ctx.strokeStyle = `rgba(255,255,255,${1 - ring})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + ring * 40, 0, 6.283); ctx.stroke(); }
+}
+
+function background(t, cam) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 5) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // parallax dotted columns (time grid)
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  const off = (cam.x * 0.4) % 120;
+  for (let x = -off; x < W; x += 120) for (let y = 40; y < H; y += 24) ctx.fillRect(x, y, 2, 2);
+}
+
+function world(t, cam) {
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  const endX = forkX(N - 1) + SPAN + 300;
+  // main line draws from the left during the intro, then extends with HEAD
+  const mainP = prog(t, 0.6, 1.8);
+  const headX = t < T_R0 ? lerp(0, 1300, mainP) : Math.min(endX, forkX(clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1)) + SPAN * bp(t, clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1)) + 120);
+  const mainEnd = t >= T_RECAP ? endX : Math.max(headX, t < T_R0 ? headX : forkX(clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1)) + SPAN + 50);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-200, MAIN_Y); ctx.lineTo(mainEnd, MAIN_Y); ctx.stroke();
+  // main commits
+  for (let x = 200; x < mainEnd; x += 280) { if (REPOS.some((_, i) => Math.abs(x - forkX(i)) < 120 || Math.abs(x - forkX(i) - SPAN) < 120)) continue; node(x, MAIN_Y, 9, true); }
+  font('600 26px JBM'); txt('main', 40, MAIN_Y - 30, C.g1);
+  // branches
+  REPOS.forEach((r, i) => {
+    const p = t >= T_RECAP ? 1 : bp(t, i); if (p <= 0) return;
+    const { pts, by, dir } = branchPath(i);
+    node(forkX(i), MAIN_Y, 14, true, prog(t, SLOT_T(i), SLOT_T(i) + 0.4) * (p < 1 ? 1 : 0));
+    const end = drawPartial(pts, p, 'rgba(255,255,255,0.95)', 6);
+    // commits along the branch
+    [0.32, 0.5, 0.68].forEach((s, k) => {
+      if (p < s) return;
+      const x = forkX(i) + s * SPAN, q = prog(t, SLOT_T(i) + s * (R_DUR - 0.1), SLOT_T(i) + s * (R_DUR - 0.1) + 0.3);
+      node(x, by, 13 * eOutBack(clamp(q * 3), 2.5), k === 1, q < 1 ? q : 0);
+      if (cam.z > 0.6) { font('400 20px JBM'); txt(k === 0 ? HEX[i] : k === 1 ? `★ #${r.rank} this week` : 'merge → main', x, by - dir * -1 * 0 + (dir < 0 ? 44 : -30), C.g2, 'center'); }
+    });
+    if (p >= 1) node(forkX(i) + SPAN, MAIN_Y, 14, true, prog(t, SLOT_T(i) + R_DUR - 0.15, SLOT_T(i) + R_DUR + 0.25) * (t < T_RECAP ? 1 : 0));
+    // head tip
+    if (p < 1 && end) { ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(end[0], end[1], 10, 0, 6.283); ctx.fill(); }
+    // branch label
+    const lp = t >= T_RECAP ? 1 : prog(t, SLOT_T(i) + 0.15, SLOT_T(i) + 0.45);
+    if (lp > 0) {
+      const lx = forkX(i) + SPAN * 0.18, ly = dir < 0 ? by - 160 : by + 170;
+      ctx.save(); ctx.globalAlpha = clamp(lp * 2);
+      font('600 26px JBM'); txt(`⎇ ${r.owner} /`, lx, ly - 82, C.g1);
+      const ns = fit(r.name, 'IDBlack', 92, SPAN * 0.9, 40);
+      maskRise(r.name, lx, ly, lp, C.white, ns);
+      font('600 22px JBM'); const tag = `#${r.rank}`; const tw = ctx.measureText(tag).width + 28;
+      roundRect(lx - tw - 20, ly - ns * 0.62, tw, 44, 22); ctx.fillStyle = C.white; ctx.fill(); txt(tag, lx - 20 - tw / 2, ly - ns * 0.62 + 30, '#000', 'center');
+      if (cam.z > 0.6) { font('400 24px JBM'); txt(typed(r.url, prog(t, SLOT_T(i) + 0.3, SLOT_T(i) + 0.8)), lx, ly + 46, C.g2); }
+      ctx.restore();
+    }
+  });
+  // HEAD pointer
+  if (t >= 1.0 && t < T_RECAP) {
+    const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1);
+    let hx = headX, hy = MAIN_Y;
+    if (t >= T_R0) { const { pts } = branchPath(si), p = bp(t, si); const k = Math.max(1, Math.floor(p * 60)); [hx, hy] = pts[Math.min(60, k)]; }
+    font('600 22px JBM'); const w = ctx.measureText('HEAD').width + 26;
+    roundRect(hx - w / 2, hy - 90, w, 40, 8); ctx.fillStyle = C.white; ctx.fill(); txt('HEAD', hx, hy - 62, '#000', 'center');
+    ctx.fillStyle = C.white; ctx.beginPath(); ctx.moveTo(hx - 8, hy - 50); ctx.lineTo(hx + 8, hy - 50); ctx.lineTo(hx, hy - 38); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function overlay(t) {
+  if (t < T_DROP) {
+    font('600 30px JBM');
+    const cmd = '$ git log --graph --since="1 week" --top=5';
+    txt(typed(cmd, prog(t, 0.15, 1.1)), 120, 200, C.white);
+    if (Math.floor(t * 4) % 2 === 0) { ctx.fillStyle = C.white; ctx.fillRect(120 + ctx.measureText(typed(cmd, prog(t, 0.15, 1.1))).width + 8, 176, 16, 32); }
+    ghMark(W - 200, 190, 90, C.white, eOutCubic(prog(t, 0.2, 0.7)));
+  } else if (t < T_R0) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.35, T_R0 - 0.05));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    font('300px IDBlack'); const p = prog(u, 0, 0.22);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 430); const s = lerp(1.6, 1, eOutExpo(p)); ctx.scale(s, s); txt('TOP 5', 0, 0, C.white, 'center'); ctx.restore(); }
+    font('96px IDBlack'); maskRise('GITHUB REPOS THIS WEEK', W / 2, 800, prog(u, 0.45, 0.7), C.white, 96, 'center');
+    font('600 26px JBM'); txt(typed('5 branches · merged into your feed', prog(u, 0.9, 1.3)), W / 2, 870, C.g2, 'center');
+    ctx.restore();
+  } else if (t >= T_RECAP && t < T_OUT) {
+    const u = t - T_RECAP;
+    font('600 26px JBM'); txt(typed('$ git shortlog --top=5', prog(u, 0.1, 0.4)), 120, 140, C.g1);
+    REPOS.forEach((r, k) => {
+      const p = prog(u, 0.35 + k * 0.06, 0.55 + k * 0.06); if (p <= 0) return;
+      const y = 600 + k * 78; ctx.save(); ctx.globalAlpha = eOutCubic(p);
+      font('600 26px JBM'); txt('*', 120, y, C.white); txt(HEX[k], 160, y, C.g2);
+      font('44px IDBlack'); txt(`#${r.rank}  ${r.name}`, 320, y + 4, C.white);
+      font('400 24px JBM'); txt(r.url, W - 120, y, C.g2, 'right'); ctx.restore();
+    });
+  } else if (t >= T_OUT) {
+    const u = t - T_OUT;
+    ctx.fillStyle = `rgba(0,0,0,${0.85 * eOutCubic(prog(u, 0, 0.35))})`; ctx.fillRect(0, 0, W, H);
+    ghMark(W / 2, 330, 200 * eOutBack(prog(u, 0.05, 0.45), 2), C.white);
+    font('130px IDBlack'); const p = prog(u, 0.25, 0.5);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 650); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('MERGE THESE INTO', 0, -10, C.white, 'center'); ctx.restore(); }
+    font('130px IDBlack'); maskRise('YOUR WEEK.', W / 2, 790, prog(u, 0.4, 0.65), C.white, 130, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 880, C.g1, 'center');
+  }
+}
+function glitch(t) {
+  let amt = 0; for (let i = 0; i < N; i++) { const p = prog(t, SLOT_T(i) - 0.04, SLOT_T(i) + 0.14); if (p > 0 && p < 1) amt = Math.max(amt, Math.sin(p * Math.PI)); }
+  const pd = prog(t, T_DROP - 0.02, T_DROP + 0.2); if (pd > 0 && pd < 1) amt = Math.max(amt, Math.sin(pd * Math.PI));
+  if (amt <= 0.01) return;
+  tctx.clearRect(0, 0, W, H); tctx.drawImage(cv, 0, 0);
+  const seed = Math.floor(t * 30);
+  for (let i = 0; i < 10; i++) {
+    const y = hash(seed + i * 3.1) * H, h = 8 + hash(seed + i * 7.7) * 60, dx = (hash(seed + i * 1.9) - 0.5) * 180 * amt;
+    ctx.drawImage(tmp, 0, y, W, h, dx, y, W, h);
+    ctx.fillStyle = `rgba(255,255,255,${0.15 * amt})`; ctx.fillRect(0, y, W, 2);
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  const cam = camAt(t);
+  background(t, cam);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 20 * shake, (hash(frame + 5) - 0.5) * 20 * shake);
+  world(t, cam);
+  ctx.restore();
+  overlay(t);
+  glitch(t);
+  flashes(t, [[T_DROP, '255,255,255', 0.5], [T_RECAP, '255,255,255', 0.3], [T_OUT, '255,255,255', 0.5]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>
