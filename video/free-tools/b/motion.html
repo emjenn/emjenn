@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Free Tools B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>window.PALETTE = { acc: '#3B82F6' };</script>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Dock" - a desktop where each free tool launches from the dock into its own window.
+const BLUE = '#3B82F6', CYAN = '#67E8F9', NAVY = '#0B1530';
+const DOCK_Y = 960, ICON = 84, GAP = 18, DOCK_W = N * ICON + (N - 1) * GAP + 48;
+const iconX = i => W / 2 - DOCK_W / 2 + 24 + i * (ICON + GAP) + ICON / 2;
+const initials = r => r.name.replace(/[^A-Za-z ]/g, ' ').split(/[\s-]+/).filter(Boolean).map(w => w[0].toUpperCase()).join('').slice(0, 2) || r.name[0];
+
+function appIcon(i, x, y, s, alpha = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.globalAlpha *= alpha;
+  const g = ctx.createLinearGradient(-ICON / 2, -ICON / 2, ICON / 2, ICON / 2);
+  g.addColorStop(0, i % 2 ? CYAN : '#93C5FD'); g.addColorStop(1, BLUE);
+  roundRect(-ICON / 2, -ICON / 2, ICON, ICON, 20); ctx.fillStyle = g; ctx.fill();
+  font('38px IDBlack'); txt(initials(REPOS[i]), 0, 14, NAVY, 'center');
+  ctx.restore();
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 6);
+  [[0.25, 0.3, BLUE], [0.8, 0.65, CYAN]].forEach(([gx, gy, c], k) => {
+    const x = W * gx + Math.sin(t * 0.4 + k) * 120, y = H * gy + Math.cos(t * 0.3 + k) * 80;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 900); g.addColorStop(0, rgba(c, 0.1 + pk * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  });
+}
+function menubar(t, a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(11,21,48,0.75)'; ctx.fillRect(0, 0, W, 48);
+  ghMark(40, 24, 24, C.white);
+  font('600 20px JBM'); txt('Open Source OS', 70, 31, C.white);
+  ['File', 'Edit', 'View', 'Window'].forEach((m, k) => txt(m, 270 + k * 90, 31, C.g1));
+  const opened = clamp(Math.floor((t - T_R0) / R_DUR) + 1, 0, N);
+  txt(`${t >= T_RECAP ? 10 : opened} apps · $0.00 / mo`, W - 40, 31, CYAN, 'right');
+  ctx.restore();
+}
+function dock(t, a) {
+  if (a <= 0) return;
+  const si = t >= T_R0 && t < T_RECAP ? clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1) : -1;
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(0, (1 - eOutExpo(clamp(a))) * 160);
+  roundRect(W / 2 - DOCK_W / 2, DOCK_Y - ICON / 2 - 16, DOCK_W, ICON + 32, 28); ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1.5; ctx.stroke();
+  for (let i = 0; i < N; i++) {
+    const pop = eOutBack(prog(t, 0.9 + i * 0.07, 1.2 + i * 0.07), 2.2);
+    let y = DOCK_Y, s = pop;
+    if (i === si) { const u = t - SLOT_T(i); y -= Math.abs(Math.sin(prog(u, 0, 0.3) * Math.PI * 2)) * 50; s *= 1.25; }
+    appIcon(i, iconX(i), y, s);
+    const launched = t >= SLOT_T(i) + 0.2;
+    if (launched) { ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(iconX(i), DOCK_Y + ICON / 2 + 8, 3.5, 0, 6.283); ctx.fill(); }
+    if (i === si) { font('600 20px JBM'); const w = ctx.measureText(REPOS[i].name).width + 28; roundRect(iconX(i) - w / 2, DOCK_Y - 130, w, 38, 10); ctx.fillStyle = 'rgba(11,21,48,0.95)'; ctx.fill(); txt(REPOS[i].name, iconX(i), DOCK_Y - 104, C.white, 'center'); }
+  }
+  ctx.restore();
+}
+function windowFrame(x, y, w, h, title, active) {
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 50; ctx.shadowOffsetY = 20;
+  roundRect(x, y, w, h, 20); ctx.fillStyle = '#0A1022'; ctx.fill(); ctx.restore();
+  ctx.strokeStyle = active ? rgba(BLUE, 0.8) : 'rgba(255,255,255,0.12)'; ctx.lineWidth = 2; roundRect(x, y, w, h, 20); ctx.stroke();
+  ctx.save(); roundRect(x, y, w, 52, 20); ctx.clip(); ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(x, y, w, 52); ctx.restore();
+  [C.white, CYAN, BLUE].forEach((c, k) => { ctx.fillStyle = active ? c : C.g3; ctx.beginPath(); ctx.arc(x + 30 + k * 26, y + 26, 8, 0, 6.283); ctx.fill(); });
+  font('600 20px JBM'); txt(title, x + w / 2, y + 33, active ? C.g1 : C.g2, 'center');
+}
+function appWindow(t, i, depth) {
+  const u = t - SLOT_T(i), r = REPOS[i];
+  const open = eOutExpo(prog(u, 0.04, 0.26));
+  const w = 1240, h = 640, cx = W / 2 - depth * 46, cy = 470 - depth * 40;
+  const sx = lerp(iconX(i), cx, open), sy = lerp(DOCK_Y, cy, open), sc = lerp(0.06, 1, open) * (1 - depth * 0.04);
+  if (open <= 0) return;
+  ctx.save(); ctx.translate(sx, sy); ctx.scale(sc, sc); ctx.globalAlpha = clamp(open * 2) * (depth ? 0.55 - depth * 0.15 : 1);
+  windowFrame(-w / 2, -h / 2, w, h, url(r), depth === 0);
+  if (depth === 0) {
+    const x0 = -w / 2 + 70;
+    ctx.save(); ctx.translate(x0 + 110, -h / 2 + 230); appIcon(i, 0, 0, 2.3); ctx.restore();
+    const tx = x0 + 290;
+    font('600 22px JBM'); txt(`APP ${pad2(i + 1)} / 10`, tx, -h / 2 + 140, CYAN);
+    const ns = fit(r.name, 'IDBlack', 92, w - 380, 40); maskRise(r.name, tx, -h / 2 + 250, prog(u, 0.12, 0.28), C.white, ns);
+    font('40px IDMed'); wrap(r.desc, w - 400).forEach((l, k) => maskRise(l, tx, -h / 2 + 330 + k * 54, prog(u, 0.16 + k * 0.04, 0.32 + k * 0.04), C.g1, 40));
+    // badge row
+    font('600 22px JBM'); const b1 = 'OPEN SOURCE', b2 = 'REPLACES PAID SOFTWARE';
+    const bw1 = ctx.measureText(b1).width + 40, bw2 = ctx.measureText(b2).width + 40, by = h / 2 - 120;
+    roundRect(x0, by, bw1, 50, 25); ctx.fillStyle = BLUE; ctx.fill(); txt(b1, x0 + bw1 / 2, by + 33, C.white, 'center');
+    roundRect(x0 + bw1 + 16, by, bw2, 50, 25); ctx.strokeStyle = CYAN; ctx.lineWidth = 2; ctx.stroke(); txt(b2, x0 + bw1 + 16 + bw2 / 2, by + 33, CYAN, 'center');
+    font('600 26px JBM'); txt('$0.00', w / 2 - 60, by + 34, C.white, 'right');
+  }
+  ctx.restore();
+}
+function intro(t) {
+  ghMark(W / 2, 420, 150 * eOutBack(prog(t, 0.05, 0.5), 1.8), C.white);
+  font('600 26px JBM'); txt(typed('Open Source OS · booting', prog(t, 0.2, 0.6)), W / 2, 570, C.g1, 'center');
+  const bp = eOutCubic(prog(t, 0.3, 0.9)); roundRect(W / 2 - 200, 610, 400, 8, 4); ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill();
+  roundRect(W / 2 - 200, 610, 400 * bp, 8, 4); ctx.fillStyle = BLUE; ctx.fill();
+}
+function headline(t) {
+  const u = t - T_DROP, open = eOutExpo(prog(u, 0, 0.3)), out = eInExpo(prog(t, T_R0 - 0.2, T_R0));
+  const w = 1500, h = 640;
+  ctx.save(); ctx.translate(W / 2, 450); ctx.scale(lerp(0.3, 1, open) * (1 - out * 0.9), lerp(0.3, 1, open) * (1 - out * 0.9)); ctx.globalAlpha = clamp(open * 2) * (1 - out);
+  windowFrame(-w / 2, -h / 2, w, h, 'README.md', true);
+  font('600 28px JBM'); txt('# 10 FREE OPEN-SOURCE TOOLS', -w / 2 + 80, -h / 2 + 140, CYAN);
+  font('110px IDBlack'); maskRise('THAT REPLACE', -w / 2 + 80, -h / 2 + 290, prog(u, 0.15, 0.35), C.white, 110);
+  maskRise('PAID SOFTWARE.', -w / 2 + 80, -h / 2 + 420, prog(u, 0.25, 0.45), C.white, 110);
+  font('110px IDBlack'); const pw = ctx.measureText('PAID').width;
+  ctx.fillStyle = BLUE; ctx.fillRect(-w / 2 + 70, -h / 2 + 380, (pw + 20) * eOutExpo(prog(u, 0.55, 0.75)), 14);
+  font('600 26px JBM'); txt(typed('$ open ./dock --all', prog(u, 0.8, 1.2)), -w / 2 + 80, h / 2 - 70, C.g1);
+  ctx.restore();
+}
+function recap(t) {
+  const u = t - T_RECAP;
+  font('600 24px JBM'); txt('ALL 10 APPS · $0.00 / MONTH', W / 2, 110, CYAN, 'center');
+  REPOS.forEach((r, i) => {
+    const col = i % 5, row = Math.floor(i / 5), w = 330, h = 330, x = 110 + col * (w + 30) + w / 2, y = 330 + row * (h + 30);
+    const p = eOutBack(prog(u, 0.05 + i * 0.04, 0.35 + i * 0.04), 1.6); if (p <= 0) return;
+    ctx.save(); ctx.translate(x, y); ctx.scale(p, p);
+    windowFrame(-w / 2, -h / 2, w, h, r.path.split('/')[1].slice(0, 22), true);
+    appIcon(i, 0, -50, 1.1);
+    fit(r.name, 'IDBlack', 32, w - 40, 18); txt(r.name, 0, 40, C.white, 'center');
+    font('18px IDMed'); wrap(r.desc, w - 50).slice(0, 3).forEach((l, k) => txt(l, 0, 78 + k * 24, C.g1, 'center'));
+    ctx.restore();
+  });
+}
+function outro(t) {
+  const u = t - T_OUT;
+  font('150px IDBlack'); const p = prog(u, 0.15, 0.4);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 470); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('CANCEL THE', 0, -40, C.white, 'center'); txt('SUBSCRIPTIONS.', 0, 110, BLUE, 'center'); ctx.restore(); }
+  font('italic 60px NR'); maskRise('install these instead', W / 2, 700, prog(u, 0.45, 0.75), C.g1, 60, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.7, 1.1)), W / 2, 780, C.white, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  menubar(t, prog(t, 0.6, 1.0) * (1 - prog(t, T_OUT, T_OUT + 0.3)));
+  if (t < T_DROP) intro(t); else if (t < T_R0) headline(t);
+  else if (t < T_RECAP) { const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1); for (let d = Math.min(2, si); d >= 0; d--) appWindow(t, si - d, d); }
+  else if (t < T_OUT) recap(t); else outro(t);
+  dock(t, (t < T_OUT ? prog(t, 0.8, 1.1) : 1 - prog(t, T_OUT, T_OUT + 0.4)) * (t >= T_RECAP && t < T_OUT ? 0.0 : 1));
+  ctx.restore();
+  flashes(t, [[T_DROP, '59,130,246', 0.4], [T_RECAP, '103,232,249', 0.25], [T_OUT, '59,130,246', 0.4]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

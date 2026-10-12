@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Free Tools C</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>window.PALETTE = { acc: '#FF3B5C' };</script>
+<script src="../common/lib.js"></script>
+<script>
+// Option C: "Flip Wall" - a wall of locked PAID tiles; each flips to reveal the free tool.
+const RED = C.acc;
+const TW = 330, TH = 380, G = 24, GX = (W - (5 * TW + 4 * G)) / 2, GY = 150;
+const tileC = i => ({ x: GX + (i % 5) * (TW + G) + TW / 2, y: GY + Math.floor(i / 5) * (TH + G) + TH / 2 });
+const OVER = { x: W / 2, y: GY + TH + G / 2, z: 1 };
+const TCAM = i => { const c = tileC(i); return { x: c.x, y: c.y, z: 2.15 }; };
+
+function camAt(t) {
+  const mv = (a, b, p) => ({ x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), z: lerp(a.z, b.z, p) * (1 - 0.25 * Math.sin(Math.PI * p)) });
+  if (t < T_R0 - 0.15) return OVER;
+  if (t < T_RECAP - 0.1) { const i = clamp(Math.floor((t - (T_R0 - 0.15)) / R_DUR), 0, N - 1), t0 = SLOT_T(i) - 0.15; return mv(i === 0 ? OVER : TCAM(i - 1), TCAM(i), eInOutCubic(prog(t, t0, t0 + 0.28))); }
+  return mv(TCAM(N - 1), OVER, eInOutCubic(prog(t, T_RECAP - 0.1, T_RECAP + 0.35)));
+}
+const flipAt = (t, i) => eInOutCubic(prog(t, SLOT_T(i) + 0.08, SLOT_T(i) + 0.3));
+
+function lock(x, y, s, open = 0, col = C.white) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.strokeStyle = col; ctx.lineWidth = 7; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(open * 22, -18 - open * 14, 20, Math.PI, 0); ctx.lineTo(20 + open * 22, -2 - open * 14); ctx.moveTo(-20 + open * 22, -18 - open * 14); ctx.lineTo(-20 + open * 22, -2 - open * 14 + (open > 0.5 ? -12 : 0)); ctx.stroke();
+  roundRect(-30, -4, 60, 46, 8); ctx.fillStyle = col; ctx.fill();
+  ctx.restore();
+}
+function tile(t, i, flipP, dropP) {
+  if (dropP <= 0) return;
+  const c = tileC(i), r = REPOS[i];
+  const sx = Math.cos(Math.PI * flipP), front = sx < 0, lift = 1 + Math.sin(Math.PI * flipP) * 0.12;
+  ctx.save(); ctx.translate(c.x, c.y - (1 - eOutBack(dropP, 1.4)) * 300); ctx.scale(Math.max(Math.abs(sx), 0.02) * lift, lift); ctx.globalAlpha *= clamp(dropP * 3);
+  roundRect(-TW / 2, -TH / 2, TW, TH, 22);
+  if (!front) {
+    ctx.fillStyle = RED; ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.12)'; for (let k = -10; k < 20; k++) ctx.fillRect(-TW / 2 + k * 24, -TH / 2, 6, TH);
+    lock(0, -40, 1.6, 0, C.white);
+    font('60px IDBlack'); txt('PAID', 0, 90, C.white, 'center');
+    font('600 16px JBM'); txt('SUBSCRIPTION REQUIRED', 0, 130, 'rgba(255,255,255,0.8)', 'center');
+    font('600 18px JBM'); txt(pad2(i + 1), -TW / 2 + 22, -TH / 2 + 36, 'rgba(255,255,255,0.8)');
+  } else {
+    ctx.fillStyle = C.white; ctx.fill();
+    ctx.fillStyle = RED; ctx.fillRect(-TW / 2, -TH / 2 + 56, TW, 6);
+    font('600 18px JBM'); txt(pad2(i + 1), -TW / 2 + 22, -TH / 2 + 38, RED); txt('FREE', TW / 2 - 22, -TH / 2 + 38, RED, 'right');
+    lock(TW / 2 - 90, -TH / 2 + 30, 0.35, 1, RED);
+    const ns = fit(r.name, 'IDBlack', 40, TW - 44, 20); txt(r.name, -TW / 2 + 22, -TH / 2 + 120, '#000');
+    font('21px IDMed'); wrap(r.desc, TW - 44).slice(0, 5).forEach((l, k) => txt(l, -TW / 2 + 22, -TH / 2 + 160 + k * 28, '#333'));
+    font('400 14px JBM'); wrap(r.path, TW - 44).slice(0, 2).forEach((l, k) => txt(l, -TW / 2 + 22, TH / 2 - 52 + k * 18, '#666'));
+    roundRect(-TW / 2 + 22, TH / 2 - 26 - 0, 150, 0, 0);
+    void ns;
+  }
+  ctx.restore();
+}
+function wall(t, cam) {
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  const active = t >= T_R0 - 0.15 && t < T_RECAP ? clamp(Math.floor((t - (T_R0 - 0.15)) / R_DUR), 0, N - 1) : -1;
+  const order = [...Array(N).keys()].filter(i => i !== active); if (active >= 0) order.push(active);
+  for (const i of order) {
+    const drop = prog(t, 0.2 + i * 0.08, 0.6 + i * 0.08);
+    const fl = t >= T_OUT ? 1 : flipAt(t, i);
+    if (i === active) { const c = tileC(i); const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 420); g.addColorStop(0, rgba(RED, 0.3)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(c.x - 450, c.y - 450, 900, 900); }
+    tile(t, i, fl, drop);
+  }
+  ctx.restore();
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 1000);
+  g.addColorStop(0, rgba(RED, 0.06 + pulseAt(t, 6) * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function overlays(t) {
+  if (t < T_DROP) {
+    font('600 28px JBM'); txt(typed('10 subscriptions you’re paying for…', prog(t, 0.6, 1.5)), W / 2, 90, C.white, 'center');
+  } else if (t < T_R0) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 300 - 10, W * eOutExpo(prog(u, 0, 0.25)), 480);
+    font('72px IDBlack'); maskRise('10 FREE OPEN-SOURCE TOOLS', W / 2, 420, prog(u, 0.05, 0.25), RED, 72, 'center');
+    font('130px IDBlack'); maskRise('THAT REPLACE', W / 2, 570, prog(u, 0.15, 0.35), C.white, 130, 'center');
+    maskRise('PAID SOFTWARE.', W / 2, 710, prog(u, 0.25, 0.45), C.white, 130, 'center');
+    ctx.restore();
+  } else if (t < T_RECAP) {
+    const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1);
+    font('600 24px JBM'); ctx.fillStyle = 'rgba(0,0,0,0.7)'; roundRect(60, 110, 330, 56, 28); ctx.fill();
+    txt(`UNLOCKED ${pad2(si + 1)} / 10`, 225, 146, RED, 'center');
+  } else if (t < T_OUT) {
+    const u = t - T_RECAP;
+    font('600 26px JBM'); txt(typed('ALL 10 UNLOCKED · $0', prog(u, 0.3, 0.7)), W / 2, 100, RED, 'center');
+  } else {
+    const u = t - T_OUT;
+    ctx.fillStyle = `rgba(0,0,0,${0.85 * eOutCubic(prog(u, 0, 0.35))})`; ctx.fillRect(0, 0, W, H);
+    lock(W / 2, 320, 3 * eOutBack(prog(u, 0.05, 0.4), 2), eOutBack(prog(u, 0.35, 0.6), 2), RED);
+    font('160px IDBlack'); const p = prog(u, 0.25, 0.5);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 640); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('UNLOCK THEM ALL.', 0, 0, C.white, 'center'); ctx.restore(); }
+    font('italic 62px NR'); maskRise('stop renting software you can own', W / 2, 740, prog(u, 0.55, 0.85), RED, 62, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.85, 1.25)), W / 2, 830, C.white, 'center');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  const cam = camAt(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  for (let i = 0; i < N; i++) if (t >= SLOT_T(i) + 0.3) shake = Math.max(shake, 0.25 * Math.exp(-(t - SLOT_T(i) - 0.3) * 14));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 20 * shake, (hash(frame + 5) - 0.5) * 20 * shake);
+  ctx.save(); if (t >= T_DROP && t < T_R0) ctx.globalAlpha = 0.5; wall(t, cam); ctx.restore();
+  overlays(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,59,92', 0.45], [T_RECAP, '255,255,255', 0.25], [T_OUT, '255,59,92', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

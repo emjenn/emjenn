@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Free Tools A</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>window.PALETTE = { acc: '#3DFF8A' };</script>
+<script src="../common/lib.js"></script>
+<script>
+// Option A: "Toggle" - a subscriptions settings panel; every tool flips PAID -> FREE.
+const LIME = C.acc;
+
+// on: 0..1 (knob position)
+function toggle(x, y, w, h, on, label = true) {
+  const r = h / 2;
+  roundRect(x, y, w, h, r); ctx.fillStyle = on > 0.5 ? LIME : '#2A2A2A'; ctx.fill();
+  if (on > 0 && on < 1) { ctx.save(); ctx.globalAlpha = on; roundRect(x, y, w, h, r); ctx.fillStyle = LIME; ctx.fill(); ctx.restore(); }
+  if (label) {
+    font(`600 ${Math.round(h * 0.36)}px JBM`);
+    if (on < 0.5) txt('PAID', x + w - h * 0.35, y + h * 0.63, C.g2, 'right'); else txt('FREE', x + h * 0.35, y + h * 0.63, '#000');
+  }
+  const kx = lerp(x + r, x + w - r, eOutBack(clamp(on), 1.6));
+  ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(kx, y + r, r * 0.8, 0, 6.283); ctx.fill();
+}
+function cursor(x, y, press = 0) {
+  ctx.save(); ctx.translate(x, y); const s = 1.3 * (1 - press * 0.15); ctx.scale(s, s);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 34); ctx.lineTo(9, 26); ctx.lineTo(15, 40); ctx.lineTo(21, 37); ctx.lineTo(15, 24); ctx.lineTo(26, 24); ctx.closePath();
+  ctx.fillStyle = C.white; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = 2.5; ctx.stroke(); ctx.restore();
+}
+function burst(x, y, p) {
+  if (p <= 0 || p >= 1) return;
+  for (let k = 0; k < 14; k++) { const a = k / 14 * 6.283, r0 = 40 + eOutExpo(p) * 160; ctx.strokeStyle = rgba(LIME, 1 - p); ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0); ctx.lineTo(x + Math.cos(a) * (r0 + 40 * (1 - p)), y + Math.sin(a) * (r0 + 40 * (1 - p))); ctx.stroke(); }
+}
+const onAt = (t, i) => eOutCubic(prog(t, SLOT_T(i) + 0.08, SLOT_T(i) + 0.3));
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W * 0.72, H * 0.45, 0, W * 0.72, H * 0.45, 1000);
+  g.addColorStop(0, rgba(LIME, 0.07 + pulseAt(t, 6) * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function intro(t) {
+  const on = eOutCubic(prog(t, 1.55, 1.8));
+  font('600 28px JBM'); txt(typed('Settings › Subscriptions › Billing', prog(t, 0.1, 0.7)), W / 2, 330, C.g1, 'center');
+  ctx.save(); ctx.translate(W / 2 - 220, 440); const s = eOutBack(prog(t, 0.3, 0.7), 1.8); ctx.scale(s, s); toggle(0, 0, 440, 200, on); ctx.restore();
+  burst(W / 2, 540, prog(t, 1.6, 2.2));
+  const mp = eInOutCubic(prog(t, 0.8, 1.45)); cursor(lerp(W / 2 + 500, W / 2 - 120, mp), lerp(900, 560, mp), prog(t, 1.45, 1.55) * (1 - prog(t, 1.6, 1.7)));
+  font('600 26px JBM'); txt(on > 0.5 ? 'monthly bill: $0' : 'monthly bill: $$$', W / 2, 760, on > 0.5 ? LIME : C.g2, 'center');
+}
+function headline(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.2, T_R0));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  font('72px IDBlack'); maskRise('10 FREE OPEN-SOURCE TOOLS', 140, 300, prog(u, 0, 0.15), LIME, 72);
+  font('130px IDBlack'); maskRise('THAT REPLACE', 140, 460, prog(u, 0, 0.2), C.white, 130);
+  font('200px IDBlack'); maskRise('PAID', 140, 660, prog(u, 0.15, 0.35), C.g2, 200);
+  const w = ctx.measureText('PAID').width; ctx.fillStyle = LIME; ctx.fillRect(130, 590, (w + 20) * eOutExpo(prog(u, 0.45, 0.65)), 16);
+  font('130px IDBlack'); maskRise('SOFTWARE.', 140 + w + 50, 660, prog(u, 0.3, 0.5), C.white, 130);
+  ctx.save(); ctx.translate(140, 740); toggle(0, 0, 260, 110, eOutCubic(prog(u, 0.8, 1.0))); ctx.restore();
+  font('600 26px JBM'); txt(typed('flip the switch →', prog(u, 0.9, 1.2)), 440, 808, C.g1);
+  ctx.restore();
+}
+function panel(t, si, allOn) {
+  const x = 80, y = 110, w = 820, h = 880;
+  roundRect(x, y, w, h, 24); ctx.fillStyle = '#0C0C0C'; ctx.fill(); ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.stroke();
+  font('600 22px JBM'); txt('SETTINGS › SUBSCRIPTIONS', x + 36, y + 52, C.g2);
+  let free = 0; REPOS.forEach((_, i) => { if (allOn || onAt(t, i) > 0.5) free++; });
+  txt(`${free}/10 FREE`, x + w - 36, y + 52, LIME, 'right');
+  REPOS.forEach((r, i) => {
+    const ry = y + 86 + i * 78, on = allOn ? 1 : onAt(t, i), act = i === si && !allOn;
+    if (act) { roundRect(x + 14, ry, w - 28, 70, 14); ctx.fillStyle = rgba(LIME, 0.1); ctx.fill(); }
+    roundRect(x + 32, ry + 12, 46, 46, 12); ctx.fillStyle = on > 0.5 ? LIME : '#222'; ctx.fill();
+    font('26px IDBlack'); txt(r.name[0].toUpperCase(), x + 55, ry + 45, on > 0.5 ? '#000' : C.g2, 'center');
+    font('30px IDBold'); txt(r.name, x + 100, ry + 46, on > 0.5 ? C.white : C.g2);
+    toggle(x + w - 160, ry + 14, 120, 44, on);
+  });
+}
+function detail(t, si) {
+  const u = t - SLOT_T(si), r = REPOS[si], x = 990;
+  font('600 24px JBM'); txt(`TOOL ${pad2(si + 1)} / 10 · REPLACES PAID SOFTWARE`, x, 250, LIME);
+  const ns = fit(r.name, 'IDBlack', 116, 860, 50); maskRise(r.name, x, 390, prog(u, 0.02, 0.18), C.white, ns);
+  font('42px IDMed'); wrap(r.desc, 840).forEach((l, k) => maskRise(l, x, 480 + k * 56, prog(u, 0.08 + k * 0.03, 0.25 + k * 0.03), C.g1, 42));
+  font('400 26px JBM'); txt(typed(url(r), prog(u, 0.12, 0.4)), x, 680, C.g2);
+  ctx.save(); ctx.translate(x, 760); toggle(0, 0, 300, 120, onAt(t, si)); ctx.restore();
+  burst(x + 240, 820, prog(u, 0.25, 0.75));
+  font('600 26px JBM'); txt('open source · $0', x + 340, 832, onAt(t, si) > 0.5 ? LIME : C.g2);
+}
+function recap(t) {
+  const u = t - T_RECAP;
+  panel(t, -1, true);
+  font('600 26px JBM'); txt('ALL 10 SWITCHED', 990, 300, LIME);
+  font('110px IDBlack'); maskRise('MONTHLY BILL:', 990, 460, prog(u, 0.1, 0.35), C.white, 110);
+  font('300px IDBlack'); const p = prog(u, 0.35, 0.6);
+  if (p > 0) { ctx.save(); ctx.translate(990, 760); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); txt('$0', 0, 0, LIME); ctx.restore(); }
+  burst(1250, 660, prog(u, 0.4, 1.0));
+}
+function outro(t) {
+  const u = t - T_OUT;
+  ctx.save(); ctx.translate(W / 2 - 200, 220); toggle(0, 0, 400, 180, eOutCubic(prog(u, 0.1, 0.35))); ctx.restore();
+  burst(W / 2, 310, prog(u, 0.15, 0.7));
+  font('160px IDBlack'); const p = prog(u, 0.25, 0.5);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 640); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('FLIP THE SWITCH.', 0, 0, C.white, 'center'); ctx.restore(); }
+  font('italic 62px NR'); maskRise('same tools. zero subscriptions.', W / 2, 740, prog(u, 0.55, 0.85), LIME, 62, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.85, 1.25)), W / 2, 830, C.white, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 20 * shake, (hash(frame + 5) - 0.5) * 20 * shake);
+  if (t < T_DROP) intro(t); else if (t < T_R0) headline(t);
+  else if (t < T_RECAP) { const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1); const e = eOutExpo(prog(t, T_R0 - 0.2, T_R0 + 0.2)); ctx.save(); ctx.globalAlpha = e; ctx.translate((1 - e) * -200, 0); panel(t, si, false); ctx.restore(); detail(t, si); }
+  else if (t < T_OUT) recap(t); else outro(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '61,255,138', 0.4], [T_RECAP, '61,255,138', 0.3], [T_OUT, '61,255,138', 0.4]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>
