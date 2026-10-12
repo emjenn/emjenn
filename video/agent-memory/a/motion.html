@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Agent Memory A</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option A: "Memory Chip" - 10 banks on a chip; each bank is written with bits as its project is stored.
+const CX = 80, CY = 190, CW = 820, CH = 700;
+const BW = 132, BH = 290, BGX = 26, BGY = 40;
+const bankXY = i => ({ x: CX + 50 + (i % 5) * (BW + BGX), y: CY + 40 + Math.floor(i / 5) * (BH + BGY) });
+const writeP = (t, i) => t >= T_RECAP ? 1 : prog(t, SLOT_T(i), SLOT_T(i) + 0.32);
+
+// halftone GitHub mark for the closing (no text)
+const DOTS = [];
+(function () {
+  const S = 600, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
+  g.translate(S / 2, S / 2); g.scale(S / 24 * 0.95, S / 24 * 0.95); g.translate(-12, -12.3); g.fillStyle = '#fff'; g.fill(GH_PATH);
+  const d = g.getImageData(0, 0, S, S).data;
+  for (let y = 8; y < S; y += 16) for (let x = 8; x < S; x += 16) { const a = d[(y * S + x) * 4 + 3] / 255; if (a > 0.05) DOTS.push({ x: x - S / 2, y: y - S / 2, a, r: hash(x * 7 + y) }); }
+})();
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(490, 540, 0, 490, 540, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function chip(t, a) {
+  if (a <= 0) return;
+  const draw = eOutExpo(prog(t, 0.1, 0.7));
+  ctx.save(); ctx.globalAlpha = a;
+  // pins
+  for (let k = 0; k < 18; k++) {
+    const x = CX + 40 + k * 44, p = prog(t, 0.3 + k * 0.02, 0.5 + k * 0.02);
+    ctx.fillStyle = C.g2; ctx.fillRect(x, CY - 34 * p, 22, 34 * p); ctx.fillRect(x, CY + CH, 22, 34 * p);
+  }
+  roundRect(CX, CY, CW, CH * draw, 22); ctx.fillStyle = '#0B0B0B'; ctx.fill(); ctx.strokeStyle = C.g3; ctx.lineWidth = 2; ctx.stroke();
+  ghMark(CX + CW - 40, CY + CH - 30, 34, C.g3, draw);
+  // traces between banks
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 2;
+  for (let k = 0; k < 9; k++) { ctx.beginPath(); ctx.moveTo(CX + 20, CY + 30 + k * 80); ctx.lineTo(CX + 20 + (CW - 40) * draw, CY + 30 + k * 80); ctx.stroke(); }
+  const si = t >= T_R0 && t < T_RECAP ? clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1) : -1;
+  for (let i = 0; i < N; i++) {
+    const { x, y } = bankXY(i), pop = eOutBack(prog(t, 0.5 + i * 0.05, 0.8 + i * 0.05), 1.6); if (pop <= 0) continue;
+    const wp = writeP(t, i), act = i === si;
+    ctx.save(); ctx.translate(x + BW / 2, y + BH / 2); ctx.scale(pop, pop); ctx.translate(-BW / 2, -BH / 2);
+    roundRect(0, 0, BW, BH, 12); ctx.fillStyle = '#111'; ctx.fill(); ctx.strokeStyle = act ? C.white : '#2A2A2A'; ctx.lineWidth = act ? 3 : 1.5; ctx.stroke();
+    // bit cells written row by row
+    const cols = 8, rows = 19, cs = (BW - 20) / cols;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const k = r * cols + c, on = k / (rows * cols) < wp;
+      const bit = hash(i * 977 + k + (act ? Math.floor(t * 12) : 0)) > 0.45;
+      ctx.fillStyle = on ? (bit ? C.white : 'rgba(255,255,255,0.35)') : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(10 + c * cs + 2, 12 + r * cs * 0.98 + 2, cs - 4, cs * 0.98 - 4);
+    }
+    font('600 20px JBM'); txt(num(i), 10, BH + 28, wp >= 1 ? C.white : C.g3);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+function panel(t) {
+  const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), r = REPOS[si], u = t - SLOT_T(si), x = 990;
+  font('600 34px JBM'); txt(num(si), x, 300, C.g2);
+  const ns = fit(r.name, 'IDBlack', 130, 840, 56);
+  maskRise(r.name, x, 300 + ns + 10, prog(u, 0.02, 0.18), C.white, ns);
+  let y = 300 + ns + 80;
+  font('400 26px JBM'); txt(typed('↳ ' + r.url, prog(u, 0.04, 0.22)), x, y, C.g1);
+  if (r.note) { y += 80; font('44px IDBold'); wrap('→ ' + r.note, 840).forEach((l, k) => maskRise(l, x, y + k * 56, prog(u, 0.12 + k * 0.04, 0.3 + k * 0.04), C.white, 44)); }
+}
+function headline(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  ctx.fillStyle = 'rgba(0,0,0,0.88)'; ctx.fillRect(0, 230, W * eOutExpo(prog(u, 0, 0.25)), 620);
+  const X = 140;
+  font('86px IDBlack'); maskRise('10 open-source GitHub projects', X, 360, prog(u, 0.05, 0.25), C.white, 86);
+  font('64px IDBold'); maskRise('that stop agents from starting from zero', X, 460, prog(u, 0.15, 0.35), C.g1, 64);
+  font('220px IDBlack'); maskRise('EVERY', X, 700, prog(u, 0.3, 0.5), C.white, 220);
+  const ew = ctx.measureText('EVERY').width;
+  font('86px IDBlack'); maskRise('new session', X + ew + 50, 700, prog(u, 0.45, 0.65), C.g1, 86);
+  ctx.restore();
+}
+function recap(t) {
+  const u = t - T_RECAP, x = 990;
+  REPOS.forEach((r, i) => {
+    const p = prog(u, 0.05 + i * 0.05, 0.3 + i * 0.05); if (p <= 0) return;
+    const y = 230 + i * 74;
+    ctx.save(); ctx.globalAlpha = eOutCubic(p); ctx.translate((1 - eOutExpo(p)) * 60, 0);
+    font('600 22px JBM'); txt(num(i), x, y, C.g2);
+    font('40px IDBlack'); txt(r.name, x + 70, y + 4, C.white);
+    font('400 16px JBM'); txt(r.url, x + 70, y + 30, C.g2);
+    ctx.restore();
+  });
+}
+function closing(t) {
+  // no text: every bit flies out of the chip and assembles into the mark
+  const u = t - T_OUT, p = eInOutCubic(prog(u, 0.1, 1.0));
+  const cx = W / 2, cy = 520;
+  for (let k = 0; k < DOTS.length; k++) {
+    const d = DOTS[k], b = bankXY(k % N);
+    const sx = b.x + 10 + (k * 37 % 112), sy = b.y + 12 + (k * 53 % 270);
+    const q = clamp((p - d.r * 0.3) / 0.7);
+    const x = lerp(sx, cx + d.x * 1.15, eOutCubic(q)), y = lerp(sy, cy + d.y * 1.15, eOutCubic(q));
+    ctx.fillStyle = `rgba(255,255,255,${0.4 + 0.6 * q})`; ctx.beginPath(); ctx.arc(x, y, lerp(4, 7.5 * d.a, q), 0, 6.283); ctx.fill();
+  }
+  const rp = prog(u, 1.0, 1.6); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 380 + rp * 400, 0, 6.283); ctx.stroke(); }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  for (let i = 0; i < N; i++) if (t >= SLOT_T(i)) shake = Math.max(shake, 0.25 * Math.exp(-(t - SLOT_T(i)) * 14));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  const chipA = t < T_DROP ? 1 : t < T_R0 ? 0.4 : t < T_OUT ? 1 : 1 - eOutCubic(prog(t, T_OUT, T_OUT + 0.3));
+  chip(t, chipA);
+  if (t >= T_DROP && t < T_R0) headline(t);
+  else if (t >= T_R0 && t < T_RECAP) panel(t);
+  else if (t >= T_RECAP && t < T_OUT) recap(t);
+  else if (t >= T_OUT) closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.25], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

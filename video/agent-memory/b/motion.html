@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Agent Memory B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Echo Stack" - every project leaves echoes, then joins a stack that never clears.
+const SX = 90, SY = 190, SH = 76, STAGE_X = 760;
+const landP = (t, i) => t >= T_RECAP ? 1 : eInOutCubic(prog(t, SLOT_T(i) + 0.55, SLOT_T(i) + 0.74));
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(1300, 520, 0, 1300, 520, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+// big text with outline echoes trailing behind it
+function echoText(s, x, y, size, p, t, al = 'left', n = 5) {
+  if (p <= 0) return;
+  font(`${size}px IDBlack`); ctx.textAlign = al; ctx.textBaseline = 'alphabetic';
+  for (let k = n; k >= 1; k--) {
+    const d = k * (14 + 10 * Math.sin(t * 3 + k)) * eOutCubic(p);
+    ctx.save(); ctx.globalAlpha *= (0.5 - k * 0.08) * clamp(p * 2); ctx.strokeStyle = C.white; ctx.lineWidth = 1.5;
+    ctx.strokeText(s, x - d, y - d * 0.6); ctx.restore();
+  }
+  maskRise(s, x, y, p, C.white, size, al);
+}
+function stackEntry(i, x, y, s, a) {
+  const r = REPOS[i];
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.globalAlpha *= a;
+  font('600 20px JBM'); txt(num(i), 0, 0, C.g2);
+  font('32px IDBlack'); txt(r.name, 62, 2, C.white);
+  font('400 15px JBM'); txt(r.url, 62, 26, C.g2);
+  ctx.restore();
+}
+function stack(t, cx = SX, scale = 1) {
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(cx - 24, SY - 40, 2, (SH * 10) * eOutExpo(prog(t, T_R0 - 0.3, T_R0 + 0.4)));
+  for (let i = 0; i < N; i++) {
+    const lp = landP(t, i); if (lp <= 0) continue;
+    // flying in from the stage
+    const fx = lerp(STAGE_X, cx, lp), fy = lerp(470, SY + i * SH * scale, lp), fs = lerp(2.2, scale, lp);
+    stackEntry(i, fx, fy, fs, clamp(lp * 2.5));
+    if (lp >= 1 && lp < 1.01) {}
+  }
+}
+function stage(t) {
+  const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), u = t - SLOT_T(si), r = REPOS[si];
+  const leave = landP(t, si); if (leave >= 1) return;
+  ctx.save(); ctx.globalAlpha = 1 - clamp(leave * 3);
+  font('600 34px JBM'); txt(num(si), STAGE_X, 330, C.g2);
+  const ns = fit(r.name, 'IDBlack', 150, 1080, 60);
+  echoText(r.name, STAGE_X, 330 + ns + 10, ns, prog(u, 0.02, 0.2), t);
+  let y = 330 + ns + 90;
+  font('400 26px JBM'); txt(typed('↳ ' + r.url, prog(u, 0.04, 0.22)), STAGE_X, y, C.g1);
+  if (r.note) { y += 76; font('46px IDBold'); wrap('→ ' + r.note, 1080).forEach((l, k) => maskRise(l, STAGE_X, y + k * 58, prog(u, 0.1 + k * 0.04, 0.28 + k * 0.04), C.white, 46)); }
+  ctx.restore();
+}
+function intro(t) {
+  // no words: memory ripples around a blinking cursor
+  const cx = W / 2, cy = 520;
+  for (let k = 0; k < 6; k++) { const p = ((t * 0.7 + k / 6) % 1); ctx.strokeStyle = `rgba(255,255,255,${0.5 * (1 - p) * prog(t, 0.1, 0.5)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 40 + p * 520, 0, 6.283); ctx.stroke(); }
+  for (let k = 4; k >= 0; k--) ghMark(cx - k * 14 * eOutCubic(prog(t, 0.8, 1.6)), cy - k * 8 * eOutCubic(prog(t, 0.8, 1.6)), 180, C.white, (k === 0 ? 1 : 0.18) * eOutBack(prog(t, 0.3, 0.8), 1.8));
+}
+function headline(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  const X = 140;
+  font('80px IDBlack'); maskRise('10 open-source GitHub projects', X, 330, prog(u, 0.05, 0.25), C.white, 80);
+  font('60px IDBold'); maskRise('that stop agents from starting from zero', X, 430, prog(u, 0.15, 0.35), C.g1, 60);
+  echoText('EVERY', X, 690, 240, prog(u, 0.3, 0.5), t, 'left', 6);
+  font('240px IDBlack'); const ew = ctx.measureText('EVERY').width;
+  font('84px IDBlack'); maskRise('new session', X + ew + 60, 690, prog(u, 0.45, 0.65), C.g1, 84);
+  ctx.restore();
+}
+function closing(t) {
+  // no text: the stack collapses into echoes of the mark
+  const u = t - T_OUT, cx = W / 2, cy = 520;
+  for (let k = 0; k < 8; k++) { const p = prog(u, k * 0.08, 0.9 + k * 0.08); if (p <= 0 || p >= 1) continue; ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - p)})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, 120 + eOutCubic(p) * 800, 0, 6.283); ctx.stroke(); }
+  const m = eOutBack(prog(u, 0.15, 0.6), 1.8);
+  for (let k = 6; k >= 1; k--) ghMark(cx - k * 18 * Math.sin(u * 2 + k) , cy - k * 12, 260, C.white, 0.12 * m);
+  ghMark(cx, cy, 260 * m, C.white, 1);
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  for (let i = 0; i < N; i++) if (t >= SLOT_T(i)) shake = Math.max(shake, 0.3 * Math.exp(-(t - SLOT_T(i)) * 14));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  if (t < T_DROP) intro(t);
+  else if (t < T_R0) headline(t);
+  else if (t < T_RECAP) { stack(t); stage(t); }
+  else if (t < T_OUT) {
+    const m = eInOutCubic(prog(t, T_RECAP, T_RECAP + 0.5));
+    ctx.save(); ctx.translate(lerp(0, 520, m), lerp(0, -50, m)); stack(t, SX, lerp(1, 1.15, m)); ctx.restore();
+  } else {
+    ctx.save(); ctx.globalAlpha = 1 - eInExpo(prog(t, T_OUT, T_OUT + 0.35)); ctx.translate(520, -50); stack(t, SX, 1.15); ctx.restore();
+    closing(t);
+  }
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.25], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

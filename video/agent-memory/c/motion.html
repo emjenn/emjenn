@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Agent Memory C</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option C: "Tape" - two reels record every project onto a strip of tape; the tape rewinds into the mark.
+const TAPE_Y = 860, TAPE_H = 70, SEG_W = 300;
+const RL = { x: 260, y: 300 }, RR = { x: 1660, y: 300 };
+
+function scrollAt(t) {
+  if (t < T_R0) return 0;
+  if (t < T_RECAP) return (t - T_R0) / R_DUR * SEG_W;
+  const end = N * SEG_W; return lerp(end, end - 0, 0);
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, 400, 0, W / 2, 400, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function reel(cx, cy, r, rot, fill, a) {
+  ctx.save(); ctx.globalAlpha *= a; ctx.translate(cx, cy);
+  // wound tape
+  ctx.fillStyle = '#1A1A1A'; ctx.beginPath(); ctx.arc(0, 0, r * (0.35 + 0.6 * fill), 0, 6.283); ctx.fill();
+  ctx.strokeStyle = C.g1; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.283); ctx.stroke();
+  ctx.rotate(rot);
+  for (let k = 0; k < 3; k++) { ctx.save(); ctx.rotate(k * 2.094); roundRect(-r * 0.12, -r * 0.92, r * 0.24, r * 0.5, 8); ctx.fillStyle = C.white; ctx.fill(); ctx.restore(); }
+  ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(0, 0, r * 0.18, 0, 6.283); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(0, 0, r * 0.08, 0, 6.283); ctx.fill();
+  ctx.restore();
+}
+function tape(t, a) {
+  ctx.save(); ctx.globalAlpha *= a;
+  const sc = scrollAt(t), headX = W / 2;
+  // strip
+  ctx.fillStyle = '#121212'; ctx.fillRect(0, TAPE_Y, W, TAPE_H);
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'; for (let x = -(sc % 40); x < W; x += 40) ctx.fillRect(x, TAPE_Y + 6, 20, 6), ctx.fillRect(x, TAPE_Y + TAPE_H - 12, 20, 6);
+  // recorded segments (segment i starts at headX + i*SEG_W - sc)
+  for (let i = 0; i < N; i++) {
+    const x0 = headX + i * SEG_W - sc, rec = t >= T_RECAP ? 1 : clamp((sc - i * SEG_W) / SEG_W);
+    if (rec <= 0) continue;
+    ctx.fillStyle = i % 2 ? '#E8E8E8' : C.white; ctx.fillRect(x0 - SEG_W * 0, TAPE_Y + 16, SEG_W * rec - 4, TAPE_H - 32);
+    font('600 18px JBM'); ctx.save(); ctx.beginPath(); ctx.rect(x0, TAPE_Y, SEG_W * rec - 4, TAPE_H); ctx.clip();
+    txt(`${num(i)} ${REPOS[i].name}`, x0 + 10, TAPE_Y + 42, '#000'); ctx.restore();
+  }
+  // record head
+  ctx.fillStyle = C.white; ctx.fillRect(headX - 2, TAPE_Y - 30, 4, TAPE_H + 60);
+  ctx.beginPath(); ctx.moveTo(headX - 16, TAPE_Y - 30); ctx.lineTo(headX + 16, TAPE_Y - 30); ctx.lineTo(headX, TAPE_Y - 8); ctx.fill();
+  if (t >= T_R0 && t < T_RECAP && Math.floor(t * 4) % 2 === 0) { ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(headX, TAPE_Y - 52, 9, 0, 6.283); ctx.fill(); }
+  ctx.restore();
+}
+function reels(t, a) {
+  const spin = t < T_R0 ? t * 2 : t * 7;
+  const fillR = t < T_R0 ? 0.1 : clamp((t - T_R0) / (T_RECAP - T_R0)), fillL = 1 - fillR * 0.9;
+  // tape paths from reels to strip
+  ctx.save(); ctx.globalAlpha = a * 0.6; ctx.strokeStyle = '#333'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(RL.x, RL.y + 150); ctx.lineTo(120, TAPE_Y + 10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(RR.x, RR.y + 150); ctx.lineTo(W - 120, TAPE_Y + 10); ctx.stroke();
+  ctx.restore();
+  reel(RL.x, RL.y, 170, -spin, fillL, a);
+  reel(RR.x, RR.y, 170, -spin, fillR, a);
+}
+function centre(t) {
+  const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), u = t - SLOT_T(si), r = REPOS[si], X = W / 2;
+  font('600 32px JBM'); txt(num(si), X, 230, C.g2, 'center');
+  const ns = fit(r.name, 'IDBlack', 120, 1000, 50); maskRise(r.name, X, 230 + ns + 10, prog(u, 0.02, 0.18), C.white, ns, 'center');
+  let y = 230 + ns + 80;
+  font('400 24px JBM'); txt(typed('↳ ' + r.url, prog(u, 0.04, 0.22)), X, y, C.g1, 'center');
+  if (r.note) { y += 72; font('42px IDBold'); wrap('→ ' + r.note, 1000).forEach((l, k) => maskRise(l, X, y + k * 54, prog(u, 0.1 + k * 0.04, 0.28 + k * 0.04), C.white, 42, 'center')); }
+}
+function headline(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0)), X = W / 2;
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  font('70px IDBlack'); maskRise('10 open-source GitHub projects', X, 260, prog(u, 0.05, 0.25), C.white, 70, 'center');
+  font('52px IDBold'); maskRise('that stop agents from starting from zero', X, 350, prog(u, 0.15, 0.35), C.g1, 52, 'center');
+  font('210px IDBlack'); maskRise('EVERY', X, 580, prog(u, 0.3, 0.5), C.white, 210, 'center');
+  font('76px IDBlack'); maskRise('new session', X, 690, prog(u, 0.45, 0.65), C.g1, 76, 'center');
+  ctx.restore();
+}
+function recap(t) {
+  const u = t - T_RECAP;
+  REPOS.forEach((r, i) => {
+    const col = Math.floor(i / 5), row = i % 5, x = 300 + col * 700, y = 250 + row * 104;
+    const p = prog(u, 0.05 + i * 0.05, 0.3 + i * 0.05); if (p <= 0) return;
+    ctx.save(); ctx.globalAlpha = eOutCubic(p);
+    font('600 22px JBM'); txt(num(i), x, y, C.g2);
+    font('40px IDBlack'); txt(r.name, x + 66, y + 4, C.white);
+    font('400 16px JBM'); txt(r.url, x + 66, y + 32, C.g2);
+    ctx.restore();
+  });
+}
+function closing(t) {
+  // no text: tape rewinds, reels pull together and become the mark
+  const u = t - T_OUT, m = eInOutCubic(prog(u, 0.1, 0.8));
+  const lx = lerp(RL.x, W / 2, m), rx = lerp(RR.x, W / 2, m), y = lerp(RL.y, 500, m);
+  const fade = 1 - eInExpo(prog(u, 0.7, 0.95));
+  reel(lx, y, 170 * lerp(1, 0.7, m), u * 30, 0.5, fade);
+  reel(rx, y, 170 * lerp(1, 0.7, m), u * 30, 0.5, fade);
+  const mk = eOutBack(prog(u, 0.8, 1.2), 1.8);
+  ghMark(W / 2, 500, 300 * mk, C.white);
+  const rp = prog(u, 0.9, 1.6); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(W / 2, 500, 200 + rp * 500, 0, 6.283); ctx.stroke(); }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  const intro = eOutBack(prog(t, 0.1, 0.7), 1.4);
+  const outA = t >= T_OUT ? 1 - eOutCubic(prog(t, T_OUT, T_OUT + 0.3)) : 1;
+  if (t < T_OUT) reels(t, (t >= T_DROP && t < T_R0 ? 0.3 : t >= T_RECAP ? 1 - 0.85 * eOutCubic(prog(t, T_RECAP, T_RECAP + 0.3)) : 1) * clamp(intro));
+  tape(t, (t >= T_DROP && t < T_R0 ? 0.3 : 1) * clamp(intro) * outA);
+  if (t >= T_DROP && t < T_R0) headline(t);
+  else if (t >= T_R0 && t < T_RECAP) centre(t);
+  else if (t >= T_RECAP && t < T_OUT) recap(t);
+  else if (t >= T_OUT) closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.25], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>
