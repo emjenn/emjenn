@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AI Resources C</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option C: "Constellation" - 39 nodes in 6 mind-map clusters; the camera flies cluster to cluster.
+const P = { violet: '#8B5CFF', magenta: '#FF3DA5', yellow: '#FFE14D', white: '#F2EEFF', dim: '#6E6890' };
+const CCOL = [P.violet, P.magenta, P.yellow, P.violet, P.magenta, P.yellow];
+
+// ---------- world layout (snake path through a 3x2 grid of clusters) ----------
+const HUBS = [[0, 0], [1500, 0], [3000, 0], [3000, 1000], [1500, 1000], [0, 1000]];
+const OVER = { x: 2050, y: 500, z: 0.4 };
+const NODES = [];
+CATS.forEach((c, ci) => {
+  const [hx, hy] = HUBS[ci], n = c.items.length, gap = Math.min(84, 700 / n);
+  c.hub = { x: hx, y: hy };
+  c.items.forEach((it, j) => {
+    const yy = hy + (j - (n - 1) / 2) * gap;
+    const xx = hx + 280 + Math.abs(j - (n - 1) / 2) * 14; // slight arc
+    NODES.push({ ci, j, x: xx, y: yy, title: it[0], url: it[1], idx: c.first + j });
+  });
+});
+function revealT(nd) {
+  const c = CATS[nd.ci], n = c.items.length, span = Math.min(1.0, (c.t1 - c.t0) * 0.5);
+  return c.t0 + 0.45 + nd.j * span / n;
+}
+const target = ci => ({ x: HUBS[ci][0] + 560, y: HUBS[ci][1], z: 1.22 });
+
+function camAt(t) {
+  if (t < T_CATS) return { x: OVER.x, y: OVER.y, z: lerp(0.24, OVER.z, eOutCubic(prog(t, 0, 2.2))) * (1 + 0.02 * Math.sin(t)) };
+  let from, to, p;
+  if (t < T_WALL) { const ci = catAt(t); from = ci === 0 ? OVER : target(ci - 1); to = target(ci); p = eInOutCubic(prog(t, CATS[ci].t0, CATS[ci].t0 + 0.5)); }
+  else if (t < T_OUT) { from = target(5); to = OVER; p = eInOutCubic(prog(t, T_WALL, T_WALL + 0.6)); }
+  else return { x: OVER.x, y: OVER.y, z: lerp(OVER.z, 0.3, eOutCubic(prog(t, T_OUT, DUR))) };
+  const z = lerp(from.z, to.z, p) * (1 - 0.35 * Math.sin(Math.PI * p));
+  return { x: lerp(from.x, to.x, p), y: lerp(from.y, to.y, p), z };
+}
+
+const STARS = Array.from({ length: 220 }, (_, i) => ({ x: hash(i) * 2400, y: hash(i + 500) * 1400, d: 0.02 + hash(i + 900) * 0.08, s: 0.6 + hash(i + 1300) * 1.6 }));
+function background(t, cam) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 5);
+  [[P.violet, 0.3, 0.3], [P.magenta, 0.75, 0.7]].forEach(([c, gx, gy]) => {
+    const g = ctx.createRadialGradient(W * gx, H * gy, 0, W * gx, H * gy, 900);
+    g.addColorStop(0, rgba(c, 0.08 + pk * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  });
+  for (const s of STARS) {
+    const x = ((s.x - cam.x * s.d) % 2400 + 2400) % 2400 - 240, y = ((s.y - cam.y * s.d) % 1400 + 1400) % 1400 - 160;
+    ctx.fillStyle = `rgba(242,238,255,${0.25 + 0.4 * Math.sin(t * 2 + s.x) ** 2})`; ctx.fillRect(x, y, s.s, s.s);
+  }
+}
+
+// partial quadratic curve hub -> node
+function edge(x0, y0, x1, y1, p, col, w) {
+  if (p <= 0) return;
+  const cx = x0 + (x1 - x0) * 0.35, cy = y1;
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x0, y0);
+  const N = 24;
+  for (let k = 1; k <= Math.ceil(N * p); k++) { const s = Math.min(k / N, p), a = (1 - s) * (1 - s), b = 2 * (1 - s) * s, c = s * s; ctx.lineTo(a * x0 + b * cx + c * x1, a * y0 + b * cy + c * y1); }
+  ctx.stroke();
+  return (s) => { const a = (1 - s) * (1 - s), b = 2 * (1 - s) * s, c = s * s; return [a * x0 + b * cx + c * x1, a * y0 + b * cy + c * y1]; };
+}
+
+function world(t, cam) {
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  const labelA = clamp((cam.z - 0.65) / 0.3);
+  const appear = i => eOutBack(prog(t, 0.15 + i * 0.03, 0.5 + i * 0.03), 2);
+  const allLit = t >= T_WALL;
+  // hub-to-hub path
+  for (let i = 0; i < 5; i++) {
+    const a = HUBS[i], b = HUBS[i + 1], p = eOutCubic(prog(t, 0.6 + i * 0.12, 1.1 + i * 0.12));
+    if (p <= 0) continue;
+    ctx.save(); ctx.setLineDash([14, 18]); ctx.lineDashOffset = -t * 60;
+    ctx.strokeStyle = rgba(P.white, 0.18); ctx.lineWidth = 4 / Math.max(cam.z, 0.4);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(lerp(a[0], b[0], p), lerp(a[1], b[1], p)); ctx.stroke(); ctx.restore();
+  }
+  // edges + nodes
+  for (const nd of NODES) {
+    const c = CATS[nd.ci], col = CCOL[nd.ci], rt = revealT(nd);
+    const lit = allLit || t >= rt;
+    const pre = appear(nd.idx);
+    const ep = allLit ? 1 : t >= rt ? eOutCubic(prog(t, rt, rt + 0.25)) : 0;
+    edge(c.hub.x + 70, c.hub.y, nd.x - 14, nd.y, 1, rgba(col, 0.3 * pre), 3);
+    const f = edge(c.hub.x + 70, c.hub.y, nd.x - 14, nd.y, ep, rgba(col, 0.8), 3.5);
+    // travelling spark on lit edges
+    if (lit && f) { const s = ((t * 0.9 + nd.j * 0.13) % 1); const [px, py] = f(s); ctx.fillStyle = P.white; ctx.beginPath(); ctx.arc(px, py, 4, 0, 6.283); ctx.fill(); }
+    // node
+    const nr = 13 * (lit ? 1 + 0.6 * Math.exp(-(t - rt) * 8) * (allLit ? 0 : 1) : 0.7) * pre;
+    if (nr > 0.3) {
+      if (lit) { ctx.fillStyle = rgba(col, 0.25); ctx.beginPath(); ctx.arc(nd.x, nd.y, nr * 2.2, 0, 6.283); ctx.fill(); }
+      ctx.fillStyle = lit ? col : rgba(col, 0.75); ctx.beginPath(); ctx.arc(nd.x, nd.y, nr, 0, 6.283); ctx.fill();
+    }
+    // label
+    if (lit) {
+      const lp = allLit ? 1 : prog(t, rt + 0.05, rt + 0.3);
+      if (labelA > 0) {
+        ctx.save(); ctx.globalAlpha = labelA * eOutCubic(lp);
+        font('600 20px JBM'); txt(pad2(nd.idx + 1), nd.x + 30, nd.y + 12, col);
+        const gap = Math.min(84, 700 / c.items.length);
+        const ts = fit(nd.title, 'IDBold', Math.min(36, gap * 0.48), 760, 18);
+        txt(nd.title, nd.x + 70 + (1 - eOutExpo(lp)) * 40, nd.y + ts * 0.15, P.white);
+        font(`400 ${Math.min(17, gap * 0.24)}px JBM`);
+        txt(typed(shortUrl(nd.url, 56), prog(t, rt + 0.1, rt + 0.45)), nd.x + 70, nd.y + ts * 0.15 + Math.min(26, gap * 0.36), P.dim);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = rgba(P.white, 0.5); ctx.fillRect(nd.x + 30, nd.y - 6, 120 + hash(nd.idx) * 300, 12);
+      }
+    }
+  }
+  // hubs
+  CATS.forEach((c, ci) => {
+    const col = CCOL[ci], on = allLit || t >= c.t0 + 0.3, pre = eOutBack(prog(t, 0.1 + ci * 0.08, 0.5 + ci * 0.08), 2);
+    if (pre <= 0) return;
+    const r = 70 * pre * (1 + (on ? pulseAt(t, 10) * 0.06 : 0));
+    ctx.fillStyle = on ? rgba(col, 0.2) : 'rgba(242,238,255,0.06)'; ctx.beginPath(); ctx.arc(c.hub.x, c.hub.y, r * 1.5, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#05030C'; ctx.beginPath(); ctx.arc(c.hub.x, c.hub.y, r, 0, 6.283); ctx.fill();
+    ctx.strokeStyle = on ? col : rgba(P.white, 0.3); ctx.lineWidth = 5; ctx.stroke();
+    ctx.save(); ctx.translate(c.hub.x, c.hub.y); ctx.rotate(t * 1.2 + ci);
+    ctx.strokeStyle = rgba(on ? col : P.white, 0.6); ctx.lineWidth = 3; ctx.setLineDash([20, 26]);
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.25, 0, 6.283); ctx.stroke(); ctx.restore();
+    font('60px IDBlack'); txt(pad2(c.items.length), c.hub.x, c.hub.y + 21, on ? col : rgba(P.white, 0.5), 'center');
+    font('40px IDBlack'); txt(c.name, c.hub.x, c.hub.y - r * 1.5 - 28, on ? col : rgba(P.white, 0.4), 'center');
+  });
+  ctx.restore();
+}
+
+function hud(t) {
+  if (t < T_CATS || t >= T_WALL) return;
+  const ci = catAt(t), c = CATS[ci], u = t - c.t0;
+  const a = prog(t, T_CATS, T_CATS + 0.3) * (1 - prog(t, T_WALL - 0.2, T_WALL));
+  ctx.save(); ctx.globalAlpha = a;
+  font('600 22px JBM'); txt(`CLUSTER ${pad2(ci + 1)} / 06`, 80, 130, P.dim);
+  // node counter bottom-left
+  let lit = 0; for (const nd of NODES) if (t >= revealT(nd)) lit++;
+  font('600 22px JBM'); txt('NODES LIT', 80, H - 130, P.dim);
+  font('56px IDBlack'); txt(pad2(lit), 80, H - 70, P.white);
+  font('600 26px JBM'); txt(`/ ${TOTAL}`, 170, H - 74, P.dim);
+  // cluster progress
+  for (let i = 0; i < 6; i++) { ctx.fillStyle = i <= ci ? CCOL[i] : 'rgba(242,238,255,0.15)'; roundRect(W - 80 - (6 - i) * 46, 112, 36, 8, 4); ctx.fill(); }
+  ctx.restore();
+}
+
+function overlayText(t) {
+  // headline over the zoomed-out network
+  if (t >= T_DROP && t < T_CATS) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_CATS - 0.35, T_CATS));
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 800);
+    g.addColorStop(0, `rgba(0,0,0,${0.75 * (1 - out)})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    font('300px IDBlack');
+    const p = prog(u, 0.05, 0.35);
+    if (p > 0) {
+      ctx.save(); ctx.translate(W / 2, 520); const s = lerp(1.6, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha *= clamp(p * 3);
+      const w = ctx.measureText('39').width, gr = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+      gr.addColorStop(0, P.violet); gr.addColorStop(0.5, P.magenta); gr.addColorStop(1, P.yellow);
+      ctx.shadowColor = rgba(P.magenta, 0.7); ctx.shadowBlur = 50; txt('39', 0, 0, gr, 'center'); ctx.restore();
+    }
+    font('96px IDBlack'); maskRise('RESOURCES', W / 2, 640, prog(u, 0.3, 0.55), P.white, 96, 'center');
+    font('italic 60px NR'); maskRise('learning AI  →  building with it', W / 2, 730, prog(u, 0.55, 0.85), P.yellow, 60, 'center');
+    ctx.restore();
+  }
+  if (t < T_DROP) {
+    font('600 24px JBM'); const p = prog(t, 0.3, 1.0);
+    if (p > 0) { ctx.globalAlpha = 1 - prog(t, 1.75, 1.98); txt(typed('> mapping 39 resources across 6 clusters', p), W / 2, 980, P.white, 'center'); ctx.globalAlpha = 1; }
+  }
+  if (t >= T_WALL && t < T_OUT) {
+    const u = t - T_WALL;
+    font('110px IDBlack'); maskRise('ALL 39. CONNECTED.', W / 2, 200, prog(u, 0.4, 0.7), P.white, 110, 'center');
+    font('600 26px JBM'); txt(typed('videos → repos → guides → books → papers → courses', prog(u, 0.6, 1.1)), W / 2, 980, P.yellow, 'center');
+  }
+  if (t >= T_OUT) {
+    const u = t - T_OUT;
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 900);
+    g.addColorStop(0, `rgba(0,0,0,${0.8 * eOutCubic(prog(u, 0, 0.4))})`); g.addColorStop(1, 'rgba(0,0,0,0.3)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    font('180px IDBlack');
+    const p = prog(u, 0.1, 0.35);
+    if (p > 0) {
+      ctx.save(); ctx.translate(W / 2, 520); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3);
+      const w = ctx.measureText('LEARN → BUILD').width, gr = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+      gr.addColorStop(0, P.violet); gr.addColorStop(0.5, P.magenta); gr.addColorStop(1, P.yellow);
+      ctx.shadowColor = rgba(P.violet, 0.7); ctx.shadowBlur = 40; txt('LEARN → BUILD', 0, 0, gr, 'center'); ctx.restore();
+    }
+    font('italic 62px NR'); maskRise('bookmark the map. start anywhere.', W / 2, 640, prog(u, 0.45, 0.75), P.white, 62, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 730, P.yellow, 'center');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  const cam = camAt(t);
+  background(t, cam);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 22 * shake, (hash(frame + 4) - 0.5) * 22 * shake);
+  world(t, cam);
+  ctx.restore();
+  hud(t); overlayText(t);
+  for (const [h, c] of [[T_DROP, '139,92,255'], [T_WALL, '255,61,165'], [T_OUT, '255,225,77']]) { const p = prog(t, h, h + 0.25); if (p > 0 && p < 1) { ctx.fillStyle = `rgba(${c},${0.5 * (1 - eOutCubic(p))})`; ctx.fillRect(0, 0, W, H); } }
+  const gr = ctx.createLinearGradient(0, 0, W, 0); gr.addColorStop(0, P.violet); gr.addColorStop(0.5, P.magenta); gr.addColorStop(1, P.yellow);
+  finish(t, frame, gr);
+  watermark('242,238,255');
+  fadeOut(t);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

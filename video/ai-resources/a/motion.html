@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AI Resources A</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option A: "Terminal" - the list lives in a dev terminal: clone, ls each folder, tree.
+const P = { mint: '#3DFFB5', teal: '#19C3A6', amber: '#FFC857', white: '#E8FFF6', dim: '#5E7A70', panel: '#06120E' };
+const ICON = ['▶', '⎇', '▤', '▥', '∑', '◆'];
+const ICOL = [P.mint, P.amber, P.teal, P.mint, P.amber, P.teal];
+
+// terminal window rect (animated)
+function win(t) {
+  const open = eOutExpo(prog(t, 0.05, 0.5));
+  const big = eInOutCubic(prog(t, T_DROP - 0.05, T_DROP + 0.25));
+  const w = lerp(lerp(300, 1200, open), 1760, big), h = lerp(lerp(40, 520, open), 900, big);
+  return { x: W / 2 - w / 2, y: lerp(H / 2 - h / 2, 100, big), w, h };
+}
+function frameWin(t, r, title) {
+  roundRect(r.x, r.y, r.w, r.h, 18); ctx.fillStyle = rgba(P.panel, 0.92); ctx.fill();
+  ctx.strokeStyle = rgba(P.mint, 0.35 + pulseAt(t, 8) * 0.3); ctx.lineWidth = 2; ctx.stroke();
+  ctx.save(); roundRect(r.x, r.y, r.w, 52, 18); ctx.clip(); ctx.fillStyle = 'rgba(61,255,181,0.07)'; ctx.fillRect(r.x, r.y, r.w, 52); ctx.restore();
+  ['#FF5F57', '#FEBC2E', '#28C840'].forEach((c, i) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(r.x + 30 + i * 26, r.y + 26, 8, 0, 6.283); ctx.fill(); });
+  font('600 20px JBM'); txt(title, r.x + r.w / 2, r.y + 33, P.dim, 'center');
+}
+function cursor(t, x, y, h = 30, c = P.mint) { if (Math.floor(t * 4) % 2 === 0) { ctx.fillStyle = c; ctx.fillRect(x, y - h + 6, h * 0.5, h); } }
+function prompt(t, x, y, cmd, p, size = 28) {
+  font(`600 ${size}px JBM`);
+  txt('nrqa@ai', x, y, P.mint); let w = ctx.measureText('nrqa@ai').width;
+  txt(':~$ ', x + w, y, P.dim); w += ctx.measureText(':~$ ').width;
+  const s = typed(cmd, p); txt(s, x + w, y, P.white); w += ctx.measureText(s).width;
+  if (p < 1.2) cursor(t, x + w + 4, y, size);
+  return w;
+}
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 5);
+  const g = ctx.createRadialGradient(W * 0.3, H * 0.2, 0, W * 0.3, H * 0.2, 1100);
+  g.addColorStop(0, rgba(P.mint, 0.08 + pk * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // falling hex columns, very faint
+  font('400 18px JBM');
+  for (let c = 0; c < 48; c++) {
+    const x = 20 + c * 40, sp = 60 + hash(c) * 120, off = hash(c + 3) * H;
+    for (let r = 0; r < 6; r++) {
+      const y = ((t * sp + off + r * 26) % (H + 200)) - 100;
+      ctx.fillStyle = rgba(P.mint, (0.05 + 0.05 * (r === 5)) * (1 - r / 7) * 2);
+      txt(((c * 7 + r * 13 + Math.floor(t * 8)) % 16).toString(16), x, y, ctx.fillStyle);
+    }
+  }
+}
+
+// ---------- intro ----------
+function intro(t, r) {
+  const x = r.x + 40, y0 = r.y + 110;
+  if (t < 0.45) return;
+  prompt(t, x, y0, 'git clone github.com/nrqa/ai-resources', prog(t, 0.45, 0.85));
+  font('400 24px JBM');
+  if (t > 0.9) txt('Cloning into ‘ai-resources’...', x, y0 + 50, P.dim);
+  const pp = prog(t, 1.0, 1.65);
+  if (pp > 0) {
+    const n = Math.round(pp * TOTAL);
+    txt(`Receiving objects: ${String(Math.round(pp * 100)).padStart(3)}% (${pad2(n)}/${TOTAL})`, x, y0 + 95, P.white);
+    const bw = r.w - 80;
+    ctx.strokeStyle = rgba(P.mint, 0.4); ctx.strokeRect(x, y0 + 120, bw, 26);
+    ctx.fillStyle = P.mint; ctx.fillRect(x + 4, y0 + 124, (bw - 8) * pp, 18);
+  }
+  if (t > 1.7) { txt('done. ', x, y0 + 200, P.mint); font('600 24px JBM'); txt('6 folders, 39 resources', x + 90, y0 + 200, P.amber); }
+}
+
+// ---------- headline ----------
+function headline(t, r) {
+  const u = t - T_DROP;
+  const out = eInExpo(prog(t, T_CATS - 0.3, T_CATS));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  prompt(t, r.x + 50, r.y + 110, 'cat README.md', prog(u, 0, 0.2), 26);
+  font('380px IDBlack');
+  const p39 = prog(u, 0.15, 0.4);
+  ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y + 140, r.w, 420); ctx.clip();
+  // scanline reveal of the big number
+  const lines = Math.floor(eOutExpo(p39) * 40);
+  for (let i = 0; i < lines; i++) {
+    ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y + 160 + i * 10, r.w, 7); ctx.clip();
+    txt('39', r.x + 80 + (hash(i + Math.floor(t * 30)) - 0.5) * 30 * (1 - p39), r.y + 500, P.mint);
+    ctx.restore();
+  }
+  ctx.restore();
+  font('120px IDBlack');
+  maskRise('RESOURCES', r.x + 620, r.y + 330, prog(u, 0.35, 0.6), P.white, 120);
+  font('600 40px JBM');
+  const tl = prog(u, 0.6, 1.2);
+  if (tl > 0) {
+    const s1 = typed('from: learning AI', tl * 2);
+    txt(s1, r.x + 630, r.y + 420, P.dim);
+    const s2 = typed('to:   building with it', tl * 2 - 1);
+    txt(s2, r.x + 630, r.y + 480, P.amber);
+  }
+  // category legend chips
+  CATS.forEach((c, i) => {
+    const p = eOutBack(prog(u, 1.0 + i * 0.07, 1.35 + i * 0.07), 2);
+    if (p <= 0) return;
+    font('600 24px JBM');
+    const label = `${ICON[i]} ${c.short}/ ${pad2(c.items.length)}`;
+    const w = ctx.measureText(label).width + 36, x = r.x + 50 + i * 272, y = r.y + 640;
+    ctx.save(); ctx.translate(x + w / 2, y + 26); ctx.scale(p, p);
+    roundRect(-w / 2, -26, w, 52, 10); ctx.fillStyle = rgba(ICOL[i], 0.12); ctx.fill(); ctx.strokeStyle = ICOL[i]; ctx.lineWidth = 2; ctx.stroke();
+    txt(label, 0, 8, ICOL[i], 'center'); ctx.restore();
+  });
+  ctx.restore();
+}
+
+// ---------- categories ----------
+function sidebar(t, r, ci) {
+  const sx = r.x + 30, sw = 330;
+  ctx.fillStyle = 'rgba(61,255,181,0.04)'; ctx.fillRect(r.x + 2, r.y + 52, sw + 30, r.h - 54);
+  font('600 20px JBM'); txt('EXPLORER', sx + 10, r.y + 100, P.dim);
+  txt('▾ ai-resources', sx + 10, r.y + 145, P.white);
+  CATS.forEach((c, i) => {
+    const y = r.y + 200 + i * 62, on = i === ci, done = i < ci;
+    if (on) { ctx.fillStyle = rgba(ICOL[i], 0.14); ctx.fillRect(r.x + 2, y - 38, sw + 30, 56); ctx.fillStyle = ICOL[i]; ctx.fillRect(r.x + 2, y - 38, 5, 56); }
+    font('600 26px JBM');
+    txt(`${ICON[i]} ${c.short}/`, sx + 30, y, on ? ICOL[i] : done ? P.white : P.dim);
+    txt(pad2(c.items.length), sx + sw - 10, y, on ? ICOL[i] : P.dim, 'right');
+  });
+  // total progress
+  const shown = CATS.slice(0, ci).reduce((a, c) => a + c.items.length, 0) + revealedCount(t, ci);
+  font('600 22px JBM'); txt('LOADED', sx + 10, r.y + r.h - 150, P.dim);
+  font('64px IDBlack'); txt(`${pad2(shown)}`, sx + 10, r.y + r.h - 80, P.mint);
+  font('600 28px JBM'); txt(`/ ${TOTAL}`, sx + 110, r.y + r.h - 84, P.dim);
+}
+function revealedCount(t, ci) {
+  const c = CATS[ci], n = c.items.length, span = Math.min(0.9, (c.t1 - c.t0) * 0.5);
+  let k = 0; for (let j = 0; j < n; j++) if (t >= c.t0 + 0.25 + j * span / n) k++; return k;
+}
+function catPane(t, r, ci) {
+  const c = CATS[ci], n = c.items.length, u = t - c.t0;
+  const mx = r.x + 420, mw = r.w - 460;
+  prompt(t, mx, r.y + 110, `ls -la ~/resources/${c.short}`, prog(u, 0, 0.22), 26);
+  font('400 20px JBM'); txt(`total ${n} · ${c.name.toLowerCase()}`, mx, r.y + 150, P.dim);
+  const span = Math.min(0.9, (c.t1 - c.t0) * 0.5);
+  const rowH = Math.min(104, 660 / n), top = r.y + 200;
+  const sel = clamp(Math.floor((u - 0.25 - span) / ((c.t1 - c.t0 - 0.35 - span) / n)), -1, n - 1);
+  for (let j = 0; j < n; j++) {
+    const tj = c.t0 + 0.25 + j * span / n, p = prog(t, tj, tj + 0.18);
+    if (p <= 0) continue;
+    const y = top + j * rowH + rowH * 0.62, [title, url] = c.items[j];
+    if (j === sel) { ctx.fillStyle = rgba(ICOL[ci], 0.12); ctx.fillRect(mx - 16, y - rowH * 0.62 + 4, mw + 20, rowH - 8); ctx.fillStyle = ICOL[ci]; ctx.fillRect(mx - 16, y - rowH * 0.62 + 4, 4, rowH - 8); }
+    ctx.save(); ctx.globalAlpha = eOutCubic(p); ctx.translate((1 - eOutExpo(p)) * 60, 0);
+    font('600 22px JBM'); txt(pad2(c.first + j + 1), mx, y, P.dim);
+    txt(ICON[ci], mx + 52, y, ICOL[ci]);
+    const ts = fit(title, 'IDBold', Math.min(46, rowH * 0.5), mw * 0.58 - 92, 22);
+    txt(title, mx + 92, y + 2, j === sel ? ICOL[ci] : P.white);
+    font('400 18px JBM');
+    const su = shortUrl(url, 40);
+    txt(typed(su, prog(t, tj + 0.05, tj + 0.4)), mx + mw - 10, y, j === sel ? P.white : P.dim, 'right');
+    ctx.restore();
+    void ts;
+  }
+  // status bar
+  ctx.fillStyle = ICOL[ci]; ctx.fillRect(r.x + 2, r.y + r.h - 44, r.w - 4, 42);
+  font('600 20px JBM');
+  txt(` ${c.short.toUpperCase()}  │  ${n} items  │  branch: main  │  learn → build`, r.x + 20, r.y + r.h - 16, '#000');
+  txt(`${ci + 1}/6`, r.x + r.w - 20, r.y + r.h - 16, '#000', 'right');
+}
+function glitch(t, r, t0) {
+  const p = prog(t, t0 - 0.06, t0 + 0.1); if (p <= 0 || p >= 1) return;
+  for (let i = 0; i < 8; i++) {
+    const y = r.y + hash(i + t0 * 7) * r.h, h = 6 + hash(i * 3 + t0) * 30;
+    ctx.fillStyle = rgba(i % 2 ? P.mint : P.amber, 0.5 * Math.sin(p * Math.PI)); ctx.fillRect(r.x, y, r.w * hash(i + 9), h);
+  }
+}
+
+// ---------- wall: tree ----------
+function wall(t, r) {
+  const u = t - T_WALL;
+  prompt(t, r.x + 50, r.y + 110, 'tree ~/resources', prog(u, 0, 0.15), 26);
+  const cw = (r.w - 100) / 3;
+  let k = 0;
+  CATS.forEach((c, i) => {
+    const bx = r.x + 50 + (i % 3) * cw, by = r.y + 175 + Math.floor(i / 3) * 395;
+    const hp = prog(u, 0.1 + i * 0.05, 0.3 + i * 0.05);
+    if (hp > 0) { font('600 26px JBM'); txt(`${ICON[i]} ${c.short}/`, bx, by, ICOL[i]); }
+    c.items.forEach((it, j) => {
+      const p = prog(u, 0.15 + k * 0.018, 0.3 + k * 0.018); k++;
+      if (p <= 0) return;
+      font('400 22px JBM'); txt(j === c.items.length - 1 ? '└─' : '├─', bx, by + 40 + j * 33, P.dim);
+      fit(it[0], 'IDMed', 27, cw - 80, 14); txt(it[0], bx + 44, by + 42 + j * 33, P.white);
+    });
+  });
+  font('400 22px JBM'); if (u > 1.0) txt(`6 directories, ${TOTAL} files`, r.x + 50, r.y + r.h - 30, P.mint);
+}
+
+// ---------- outro ----------
+function outro(t, r) {
+  const u = t - T_OUT;
+  prompt(t, r.x + 50, r.y + 110, 'echo "now go build"', prog(u, 0, 0.25), 26);
+  font('190px IDBlack');
+  const p = prog(u, 0.2, 0.45);
+  if (p > 0) {
+    ctx.save(); ctx.translate(W / 2, 560); const s = lerp(1.4, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3);
+    txt('NOW GO BUILD.', 0, 0, P.mint, 'center'); ctx.restore();
+    if (p >= 1) { const w = ctx.measureText('NOW GO BUILD.').width; cursor(t, W / 2 + w / 2 + 16, 560, 150); }
+  }
+  font('italic 64px NR'); maskRise('save the list. start with one.', W / 2, 680, prog(u, 0.5, 0.8), P.white, 64, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 780, P.amber, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 24 * shake, (hash(frame + 4) - 0.5) * 24 * shake);
+  const r = win(t);
+  const ci = catAt(t);
+  frameWin(t, r, t < T_CATS ? 'nrqa@ai: ~' : t < T_WALL ? `nrqa@ai: ~/resources/${CATS[ci].short}` : 'nrqa@ai: ~/resources');
+  if (t < T_DROP) intro(t, r);
+  else if (t < T_CATS) headline(t, r);
+  else if (t < T_WALL) { sidebar(t, r, ci); catPane(t, r, ci); CATS.forEach(c => glitch(t, r, c.t0)); }
+  else if (t < T_OUT) wall(t, r);
+  else outro(t, r);
+  // scanlines over the window
+  ctx.save(); roundRect(r.x, r.y, r.w, r.h, 18); ctx.clip(); ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  for (let y = r.y; y < r.y + r.h; y += 4) ctx.fillRect(r.x, y, r.w, 1.5); ctx.restore();
+  ctx.restore();
+  for (const [h, c] of [[T_DROP, '61,255,181'], [T_WALL, '255,200,87'], [T_OUT, '61,255,181']]) { const p = prog(t, h, h + 0.25); if (p > 0 && p < 1) { ctx.fillStyle = `rgba(${c},${0.55 * (1 - eOutCubic(p))})`; ctx.fillRect(0, 0, W, H); } }
+  finish(t, frame, P.mint);
+  watermark('232,255,246');
+  fadeOut(t);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

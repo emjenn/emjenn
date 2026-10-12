@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AI Resources B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Editorial" - a magazine table of contents: red panels, slamming rows, serif accents.
+const P = { red: '#FF3B30', cream: '#F3EBDD', grey: '#8C8478', ink: '#1A1513' };
+const PANEL = 600;
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W * 0.75, H * 0.3, 0, W * 0.75, H * 0.3, 1000);
+  g.addColorStop(0, rgba(P.red, 0.07 + pulseAt(t, 5) * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+// thin horizontal rules that draw across (editorial furniture)
+function rules(t, t0, ys, col = 'rgba(243,235,221,0.18)') {
+  ys.forEach((y, i) => { const p = eOutExpo(prog(t, t0 + i * 0.05, t0 + 0.5 + i * 0.05)); ctx.fillStyle = col; ctx.fillRect(80, y, (W - 160) * p, 1.5); });
+}
+
+// ---------- intro ----------
+function intro(t) {
+  rules(t, 0.05, [150, 930]);
+  font('600 22px JBM');
+  const mp = prog(t, 0.2, 0.6);
+  if (mp > 0) { txt(typed('THE AI BUILDER’S READING LIST', mp), 80, 130, P.cream); txt(typed('ISSUE No. 39', mp), W - 80, 130, P.red, 'right'); txt(typed('VIDEOS · REPOS · GUIDES · BOOKS · PAPERS · COURSES', prog(t, 0.4, 0.9)), 80, 970, P.grey); }
+  // counter flicks 01 -> 39 in serif italic, then a red block wipes over
+  const cp = prog(t, 0.5, 1.6);
+  if (cp > 0) {
+    font('italic 420px NR');
+    const n = Math.max(1, Math.round(eOutCubic(cp) * TOTAL));
+    txt(pad2(n), W / 2, 700, n === TOTAL ? P.red : P.cream, 'center');
+    font('600 24px JBM'); txt('RESOURCES INSIDE', W / 2, 780, P.grey, 'center');
+  }
+  const wp = eInExpo(prog(t, 1.65, 2.0));
+  if (wp > 0) { ctx.fillStyle = P.red; ctx.fillRect(0, 0, W * wp, H); }
+}
+
+// ---------- headline ----------
+function headline(t) {
+  const u = t - T_DROP;
+  // red block retracts from full screen into the left slab
+  const rp = eOutExpo(prog(u, 0, 0.45));
+  const slab = lerp(W, 760, rp);
+  ctx.fillStyle = P.red; ctx.fillRect(0, 0, slab, H);
+  font('760px IDBlack');
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, slab, H); ctx.clip();
+  const s = lerp(1.3, 1, eOutExpo(prog(u, 0, 0.4)));
+  ctx.translate(380, 820); ctx.scale(s, s); txt('39', 0, 0, '#000', 'center'); ctx.restore();
+  const x = 840;
+  font('150px IDBlack'); maskRise('RESOURCES', x, 380, prog(u, 0.35, 0.6), P.cream, 150);
+  font('italic 78px NR'); maskRise('to go from learning AI', x, 500, prog(u, 0.6, 0.85), P.cream, 78);
+  font('104px IDBlack'); maskRise('to building with it.', x, 630, prog(u, 0.8, 1.05), P.red, 104);
+  const ul = eOutExpo(prog(u, 1.05, 1.35)); if (ul > 0) { ctx.fillStyle = P.cream; ctx.fillRect(x, 662, 960 * ul, 8); }
+  // contents strip
+  CATS.forEach((c, i) => {
+    const p = prog(u, 1.2 + i * 0.06, 1.45 + i * 0.06); if (p <= 0) return;
+    font('600 22px JBM');
+    ctx.save(); ctx.globalAlpha = eOutCubic(p);
+    txt(`${pad2(i + 1)}`, x + (i % 3) * 330, 780 + Math.floor(i / 3) * 60 + (1 - eOutExpo(p)) * 20, P.red);
+    txt(`${c.name} · ${c.items.length}`, x + 46 + (i % 3) * 330, 780 + Math.floor(i / 3) * 60 + (1 - eOutExpo(p)) * 20, P.cream);
+    ctx.restore();
+  });
+}
+
+// ---------- categories ----------
+function category(t, ci) {
+  const c = CATS[ci], n = c.items.length, u = t - c.t0;
+  // transition: red slab sweeps full width then settles into the left panel
+  const cover = ci === 0 ? 1 : eOutExpo(prog(u, 0, 0.12));
+  const settle = eInOutCubic(prog(u, 0.05, 0.4));
+  const pw = lerp(W, PANEL, settle);
+  ctx.fillStyle = P.red; ctx.fillRect(0, 0, pw * cover, H);
+  // panel content
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, pw * cover, H); ctx.clip();
+  font('520px IDBlack'); ctx.save(); ctx.globalAlpha = 0.18; txt(pad2(ci + 1), -30, 560, '#000'); ctx.restore();
+  font('600 24px JBM'); txt(`SECTION ${pad2(ci + 1)} / 06`, 80, 150, '#000');
+  const words = c.name.split(' ');
+  words.forEach((w, k) => { const sz = fit(w, 'IDBlack', 120, PANEL - 140); maskRise(w, 80, 640 + k * (sz * 0.95) - (words.length - 1) * 50, prog(u, 0.2 + k * 0.06, 0.45 + k * 0.06), '#000', sz); });
+  font('italic 56px NR'); maskRise(`${n} picks`, 80, 870, prog(u, 0.35, 0.6), P.cream, 56);
+  font('600 22px JBM'); txt(`#${pad2(c.first + 1)}–${pad2(c.first + n)} of ${TOTAL}`, 80, 940, '#000');
+  ctx.restore();
+  // TOC rows
+  const x0 = PANEL + 90, x1 = W - 90, top = 140, avail = 860, rowH = Math.min(118, avail / n);
+  const span = Math.min(1.0, (c.t1 - c.t0) * 0.55);
+  for (let j = 0; j < n; j++) {
+    const tj = c.t0 + 0.28 + j * span / n, p = prog(t, tj, tj + 0.22);
+    if (p <= 0) continue;
+    const y = top + j * rowH + rowH * 0.62, [title, url] = c.items[j], e = eOutExpo(p);
+    ctx.save(); ctx.beginPath(); ctx.rect(x0 - 10, y - rowH * 0.7, x1 - x0 + 20, rowH); ctx.clip();
+    ctx.translate((1 - e) * 500, 0);
+    font(`italic ${Math.min(52, rowH * 0.5)}px NR`); txt(pad2(c.first + j + 1), x0, y, P.red);
+    const ts = fit(title, 'IDBlack', Math.min(50, rowH * 0.46), (x1 - x0) * 0.68 - 90, 22);
+    txt(title, x0 + 90, y, P.cream);
+    const tw = ctx.measureText(title).width;
+    font('400 18px JBM'); const su = shortUrl(url, 30), uw = ctx.measureText(su).width;
+    txt(typed(su, prog(t, tj + 0.08, tj + 0.4)), x1, y, P.grey, 'right');
+    // dotted leader between title and url
+    ctx.fillStyle = 'rgba(243,235,221,0.25)';
+    for (let d = x0 + 90 + tw + 20; d < x1 - uw - 20; d += 12) ctx.fillRect(d, y - 6, 3, 3);
+    ctx.restore();
+    // red underline sweep per row
+    const ul = eOutExpo(prog(t, tj + 0.05, tj + 0.35));
+    ctx.fillStyle = j % 2 ? 'rgba(243,235,221,0.12)' : rgba(P.red, 0.6); ctx.fillRect(x0, y + rowH * 0.3, (x1 - x0) * ul, 2);
+    void ts;
+  }
+  // folio
+  font('600 20px JBM'); txt(`p. ${pad2(ci * 6 + 4)}`, x1, 1010, P.grey, 'right');
+}
+
+// ---------- wall ----------
+function wall(t) {
+  const u = t - T_WALL;
+  font('120px IDBlack'); maskRise('EVERYTHING.', 80, 230, prog(u, 0, 0.25), P.cream, 120);
+  font('italic 92px NR'); maskRise('one post.', 960, 230, prog(u, 0.15, 0.4), P.red, 92);
+  const cols = 13, tw = (W - 160 - 12 * 14) / cols, th = 190;
+  let k = 0;
+  CATS.forEach((c, ci) => c.items.forEach((it, j) => {
+    const r = Math.floor(k / cols), col = k % cols, x = 80 + col * (tw + 14), y = 300 + r * (th + 16);
+    const p = prog(u, 0.1 + k * 0.02, 0.35 + k * 0.02);
+    if (p > 0) {
+      const fill = ci % 2 === 0;
+      ctx.save(); ctx.translate(x + tw / 2, y + th / 2); const sy = eOutBack(p, 2); ctx.scale(1, sy);
+      ctx.fillStyle = fill ? P.red : 'rgba(243,235,221,0.06)'; ctx.fillRect(-tw / 2, -th / 2, tw, th);
+      if (!fill) { ctx.strokeStyle = rgba(P.cream, 0.4); ctx.lineWidth = 1.5; ctx.strokeRect(-tw / 2, -th / 2, tw, th); }
+      font('italic 54px NR'); txt(pad2(k + 1), -tw / 2 + 12, -th / 2 + 58, fill ? '#000' : P.red);
+      font('600 14px JBM'); txt(c.short.toUpperCase(), -tw / 2 + 12, th / 2 - 14, fill ? '#000' : P.grey);
+      ctx.restore();
+    }
+    k++;
+  }));
+  font('600 24px JBM'); txt(typed('39 RESOURCES · 6 FORMATS · 1 GOAL: SHIP', prog(u, 0.9, 1.3)), 80, 960, P.cream);
+}
+
+// ---------- outro ----------
+function outro(t) {
+  const u = t - T_OUT;
+  rules(t, T_OUT, [200, 900]);
+  font('210px IDBlack'); maskRise('LEARN IT.', W / 2, 420, prog(u, 0.05, 0.3), P.cream, 210, 'center');
+  const bp = eOutExpo(prog(u, 0.25, 0.5));
+  ctx.fillStyle = P.red; ctx.fillRect(W / 2 - 900 * bp, 470, 1800 * bp, 230);
+  ctx.save(); ctx.beginPath(); ctx.rect(W / 2 - 900 * bp, 470, 1800 * bp, 230); ctx.clip();
+  font('190px IDBlack'); txt('THEN BUILD IT.', W / 2, 655, '#000', 'center'); ctx.restore();
+  font('italic 60px NR'); maskRise('save this before it gets buried.', W / 2, 800, prog(u, 0.6, 0.9), P.cream, 60, 'center');
+  font('600 28px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.85, 1.2)), W / 2, 870, P.red, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  const pk = pulseAt(t, 12);
+  ctx.save(); ctx.translate(W / 2 + (hash(frame) - 0.5) * 26 * shake, H / 2 + (hash(frame + 4) - 0.5) * 26 * shake); ctx.scale(1 + pk * 0.008, 1 + pk * 0.008); ctx.translate(-W / 2, -H / 2);
+  if (t < T_DROP) intro(t);
+  else if (t < T_CATS) headline(t);
+  else if (t < T_WALL) category(t, catAt(t));
+  else if (t < T_OUT) wall(t);
+  else outro(t);
+  ctx.restore();
+  for (const h of [T_WALL, T_OUT]) { const p = prog(t, h, h + 0.2); if (p > 0 && p < 1) { ctx.fillStyle = `rgba(255,59,48,${0.6 * (1 - p)})`; ctx.fillRect(0, 0, W, H); } }
+  finish(t, frame, P.red);
+  watermark('243,235,221');
+  fadeOut(t);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>
