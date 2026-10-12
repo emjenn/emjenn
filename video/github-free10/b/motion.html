@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Free Repos B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Receipt" - a thermal receipt prints every repo at $0.00.
+const RX = 1100, RW = 680, SLOT_Y = 960, PAD = 36;
+
+// receipt content: blocks with a print window
+const BLOCKS = [];
+function block(h, t0, t1, draw) { BLOCKS.push({ h, t0, t1, draw }); }
+function buildReceipt() {
+  block(100, 1.0, 1.3, (y) => { font('34px IDBlack'); txt('OPEN SOURCE MART', RW / 2, y + 60, '#000', 'center'); ghMark(70, y + 48, 44, '#000'); ghMark(RW - 70, y + 48, 44, '#000'); });
+  block(60, 1.3, 1.5, (y) => { font('400 18px JBM'); txt('github.com · weekly drop · no login fees', RW / 2, y + 30, '#333', 'center'); });
+  block(40, 1.5, 1.6, (y) => dashes(y + 20));
+  block(50, 2.6, 2.8, (y) => { font('600 20px JBM'); txt('QTY  ITEM', PAD, y + 30, '#000'); txt('PRICE', RW - PAD, y + 30, '#000', 'right'); });
+  REPOS.forEach((r, i) => {
+    const t0 = SLOT_T(i);
+    block(126, t0 + 0.02, t0 + 0.32, (y) => {
+      font('600 24px JBM'); txt(`1 × ${pad2(i + 1)}`, PAD, y + 34, '#000');
+      font('28px IDBlack'); const nm = r.name.toUpperCase(); txt(nm, PAD + 120, y + 36, '#000');
+      font('600 24px JBM'); txt('$0.00', RW - PAD, y + 34, '#000', 'right');
+      font('400 16px JBM'); wrap(r.desc, RW - PAD * 2 - 120).slice(0, 2).forEach((l, k) => txt(l, PAD + 120, y + 66 + k * 22, '#444'));
+      ctx.fillStyle = '#ccc'; for (let x = PAD; x < RW - PAD; x += 10) ctx.fillRect(x, y + 118, 5, 1.5);
+    });
+  });
+  block(40, 11.0, 11.1, (y) => dashes(y + 20));
+  [['SUBTOTAL', '$0.00'], ['LICENSE FEES', '$0.00'], ['TAX', '$0.00']].forEach(([a, b], k) => block(44, 11.1 + k * 0.12, 11.22 + k * 0.12, (y) => { font('600 24px JBM'); txt(a, PAD, y + 30, '#000'); txt(b, RW - PAD, y + 30, '#000', 'right'); }));
+  block(80, 11.5, 11.7, (y) => { font('46px IDBlack'); txt('TOTAL', PAD, y + 56, '#000'); txt('$0.00', RW - PAD, y + 56, '#000', 'right'); });
+  block(50, 11.7, 11.85, (y) => { font('600 20px JBM'); txt('PAID WITH: ★ STARS', RW / 2, y + 30, '#000', 'center'); });
+  block(120, 11.85, 12.3, (y) => { for (let k = 0; k < 64; k++) { const w = 2 + Math.floor(hash(k * 3.3) * 4); ctx.fillStyle = '#000'; if (hash(k) > 0.3) ctx.fillRect(PAD + 40 + k * 9, y + 14, w, 80); } });
+  block(70, 12.3, 12.5, (y) => { font('600 20px JBM'); txt('THANK YOU FOR FORKING', RW / 2, y + 34, '#000', 'center'); txt('x.com/nrqa__', RW / 2, y + 60, '#555', 'center'); });
+  block(40, 12.5, 12.55, () => {});
+}
+function dashes(y) { font('400 18px JBM'); txt('- '.repeat(32), RW / 2, y + 6, '#555', 'center'); }
+function printedLen(t) { let L = 0; for (const b of BLOCKS) L += b.h * eOutCubic(prog(t, b.t0, b.t1)); return L; }
+
+function receipt(t, tear = 0) {
+  const L = printedLen(t); if (L <= 0) return;
+  const lift = eInExpo(tear) * 1500, rot = tear * -0.25;
+  ctx.save(); ctx.translate(RX + RW / 2, SLOT_Y - L / 2 - lift); ctx.rotate(rot); ctx.translate(-RW / 2, -L / 2);
+  ctx.beginPath(); ctx.rect(-10, Math.max(0, L - SLOT_Y - lift - 400) - 10, RW + 20, L + 20); ctx.clip();
+  // paper with zig-zag top edge
+  ctx.fillStyle = '#F2F2F2'; ctx.fillRect(0, 0, RW, L);
+  ctx.fillStyle = '#000'; for (let x = 0; x < RW; x += 20) { ctx.beginPath(); ctx.moveTo(x, -1); ctx.lineTo(x + 10, 9); ctx.lineTo(x + 20, -1); ctx.fill(); }
+  // content: block c drawn at its content y, only the printed part
+  let y = 0;
+  for (const b of BLOCKS) { const p = eOutCubic(prog(t, b.t0, b.t1)); if (p <= 0) break; ctx.save(); ctx.beginPath(); ctx.rect(0, y, RW, b.h * p); ctx.clip(); b.draw(y + 4); ctx.restore(); y += b.h * p; }
+  ctx.restore();
+  // shading near the slot
+  if (tear < 0.1) { const g = ctx.createLinearGradient(0, SLOT_Y - 60, 0, SLOT_Y); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.35)'); ctx.fillStyle = g; ctx.fillRect(RX, SLOT_Y - 60, RW, 60); }
+}
+function printer(t) {
+  ctx.fillStyle = '#1C1C1C'; roundRect(RX - 70, SLOT_Y - 10, RW + 140, 140, 26); ctx.fill();
+  ctx.strokeStyle = C.g3; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#000'; roundRect(RX - 20, SLOT_Y - 6, RW + 40, 18, 9); ctx.fill();
+  const printing = BLOCKS.some(b => t >= b.t0 && t <= b.t1);
+  ctx.fillStyle = printing && Math.floor(t * 12) % 2 === 0 ? C.white : C.g3; ctx.beginPath(); ctx.arc(RX + RW + 30, SLOT_Y + 60, 9, 0, 6.283); ctx.fill();
+  ghMark(RX - 20, SLOT_Y + 64, 40, C.g2);
+  font('600 18px JBM'); txt(printing ? 'PRINTING…' : 'READY', RX + 30, SLOT_Y + 70, C.g2);
+}
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(RX + RW / 2, SLOT_Y, 0, RX + RW / 2, SLOT_Y, 1200);
+  g.addColorStop(0, `rgba(255,255,255,${0.07 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function leftSide(t) {
+  const X = 110;
+  if (t < T_DROP) {
+    font('600 30px JBM'); txt(typed('> printing your weekly receipt…', prog(t, 0.2, 1.2)), X, 520, C.white);
+    font('600 22px JBM'); txt(typed('store: github.com  ·  items: 10', prog(t, 1.0, 1.6)), X, 570, C.g2);
+  } else if (t < T_R0) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.2, T_R0));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    font('600 26px JBM'); txt('10 GITHUB REPOSITORIES', X, 300, C.g2);
+    font('120px IDBlack'); maskRise('THAT FEEL', X, 440, prog(u, 0, 0.2), C.white, 120);
+    maskRise('ALMOST', X, 570, prog(u, 0.12, 0.32), C.white, 120);
+    font('170px IDBlack'); maskRise('ILLEGAL', X, 740, prog(u, 0.3, 0.5), C.white, 170);
+    font('italic 80px NR'); maskRise('to be free.', X, 850, prog(u, 0.55, 0.8), C.g1, 80);
+    ctx.restore();
+  } else if (t < T_RECAP) {
+    const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), u = t - SLOT_T(si), r = REPOS[si];
+    font('600 28px JBM'); txt(`ITEM ${pad2(si + 1)} / 10`, X, 240, C.g2);
+    const ns = fit(r.name, 'IDBlack', 120, 900, 60);
+    maskRise(r.name, X, 380, prog(u, 0, 0.15), C.white, ns);
+    font('38px IDMed'); wrap(r.desc, 880).forEach((l, k) => maskRise(l, X, 470 + k * 54, prog(u, 0.05 + k * 0.03, 0.22 + k * 0.03), C.g1, 38));
+    font('400 26px JBM'); txt(typed(url(r), prog(u, 0.1, 0.35)), X, 700, C.g2);
+    // price tag: crossed-out "$$$" -> $0.00
+    font('110px IDBlack'); const sp = prog(u, 0.15, 0.3);
+    txt('$$$', X, 870, C.g3); const sw = ctx.measureText('$$$').width;
+    ctx.fillStyle = C.white; ctx.fillRect(X - 10, 830, (sw + 20) * eOutExpo(sp), 10);
+    if (sp > 0) { ctx.save(); ctx.globalAlpha = clamp(sp * 3); txt('$0.00', X + sw + 50, 870, C.white); ctx.restore(); }
+  } else if (t < T_OUT) {
+    const u = t - T_RECAP;
+    font('600 30px JBM'); txt('YOUR TOTAL FOR 10 REPOS', X, 330, C.g2);
+    font('300px IDBlack'); const p = prog(u, 0.4, 0.65);
+    if (p > 0) { ctx.save(); ctx.translate(X, 640); const s = lerp(1.4, 1, eOutExpo(p)); ctx.scale(s, s); txt('$0.00', 0, 0, C.white); ctx.restore(); }
+    font('italic 64px NR'); maskRise('almost illegal.', X, 760, prog(u, 0.8, 1.1), C.g1, 64);
+  }
+}
+function outro(t) {
+  const u = t - T_OUT;
+  font('170px IDBlack'); const p = prog(u, 0.2, 0.45);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 520); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('10 REPOS. $0.00.', 0, 0, C.white, 'center'); ctx.restore(); }
+  font('italic 64px NR'); maskRise('keep the receipt. star the repos.', W / 2, 640, prog(u, 0.5, 0.8), C.g1, 64, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 740, C.white, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 20 * shake, (hash(frame + 5) - 0.5) * 20 * shake);
+  const tear = prog(t, T_OUT, T_OUT + 0.6);
+  const out = eInExpo(prog(t, T_OUT, T_OUT + 0.5));
+  ctx.save(); ctx.globalAlpha = 1 - out; printer(t); ctx.restore();
+  receipt(t, tear);
+  if (t < T_OUT) leftSide(t); else outro(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.25], [T_OUT, '255,255,255', 0.5]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => { buildReceipt(); render(0, 0); });
+</script>
+</body>
+</html>
