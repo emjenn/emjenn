@@ -1,0 +1,154 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Opus Cheatsheet B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Big Words" - each tip is one giant keyword that acts out the advice.
+const KEYS = ['MEDIUM.', 'STEP BY STEP', 'KEEP GOING', 'FENCE IT', 'JUST SHOW IT', 'SAY NO.'];
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 5);
+  const g = ctx.createRadialGradient(W / 2, H * 0.55, 0, W / 2, H * 0.55, 1000);
+  g.addColorStop(0, rgba(C.orange, 0.08 + pk * 0.05)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function outlineText(s, x, y, size, col, lw = 3, al = 'center') { font(`${size}px IDBlack`); ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.textAlign = al; ctx.textBaseline = 'alphabetic'; ctx.strokeText(s, x, y); }
+
+function intro(t) {
+  const words = [['OFFICIAL', 0.3], ['PROMPTING', 0.8], ['GUIDE', 1.3]];
+  words.forEach(([w, t0], k) => {
+    const p = prog(t, t0, t0 + 0.12), out = prog(t, t0 + 0.45, t0 + 0.5);
+    if (p <= 0 || out >= 1) return;
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    const s = lerp(1.25, 1, eOutExpo(p));
+    ctx.translate(W / 2, 600); ctx.scale(s, s);
+    if (k === 1) { font('300px IDBlack'); txt(w, 0, 0, C.cream, 'center'); } else outlineText(w, 0, 0, 300, C.orange, 4);
+    ctx.restore();
+  });
+  font('600 26px JBM'); txt(typed('anthropic just published its', prog(t, 0.1, 0.5)), W / 2, 260, C.dim, 'center');
+  spark(W / 2, 860, 50, prog(t, 1.6, 2.0), t, C.orange);
+}
+function title(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_TIP0 - 0.2, T_TIP0));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  font('420px IDBlack');
+  const p = prog(u, 0, 0.22);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 600); const s = lerp(1.8, 1, eOutExpo(p)) * (1 + pulseAt(t, 10) * 0.02); ctx.scale(s, s); txt('OPUS 5.5', 0, 0, C.orange, 'center'); ctx.restore(); }
+  const p2 = prog(u, 0.55, 0.8);
+  if (p2 > 0) { ctx.save(); ctx.globalAlpha *= eOutCubic(p2); outlineText('PROMPTING CHEATSHEET', W / 2, 800 + (1 - eOutExpo(p2)) * 60, 120, C.cream, 3); ctx.restore(); }
+  font('600 28px JBM'); txt(typed('6 rules · 1.5 seconds each · save it', prog(u, 0.9, 1.3)), W / 2, 900, C.dim, 'center');
+  ctx.restore();
+}
+
+// ----- per-tip keyword performances -----
+function performKey(i, t, u) {
+  const k = KEYS[i], y = 610, p = prog(u, 0, 0.18);
+  const size = fit(k, 'IDBlack', 320, W - 200);
+  ctx.save();
+  if (i === 0) { // MEDIUM: slider knob slides from HIGH back to MED
+    const s = lerp(1.4, 1, eOutExpo(p)); ctx.translate(W / 2, y); ctx.scale(s, s); txt(k, 0, 0, C.orange, 'center'); ctx.restore(); ctx.save();
+    const x0 = W / 2 - 360, x1 = W / 2 + 360, sy = y + 70;
+    ctx.fillStyle = 'rgba(240,238,230,0.15)'; roundRect(x0, sy, x1 - x0, 12, 6); ctx.fill();
+    font('600 22px JBM'); ['LOW', 'MED', 'HIGH'].forEach((l, j) => txt(l, lerp(x0, x1, j / 2), sy + 52, j === 1 ? C.orange : C.dim, 'center'));
+    const kx = lerp(x1, W / 2, eOutBack(prog(u, 0.15, 0.55), 2));
+    ctx.fillStyle = C.orange; roundRect(x0, sy, kx - x0, 12, 6); ctx.fill();
+    ctx.fillStyle = C.cream; ctx.beginPath(); ctx.arc(kx, sy + 6, 18, 0, 6.283); ctx.fill();
+  } else if (i === 1) { // STEP BY STEP: slashed
+    font(`${size}px IDBlack`); ctx.globalAlpha = clamp(p * 3); txt(k, W / 2, y + (1 - eOutExpo(p)) * 80, rgba(C.cream, 0.8), 'center');
+    const w = ctx.measureText(k).width, sp = eOutExpo(prog(u, 0.2, 0.4));
+    ctx.save(); ctx.translate(W / 2, y - size * 0.33); ctx.rotate(-0.06); ctx.fillStyle = C.orange; ctx.fillRect(-w / 2 - 30, -10, (w + 60) * sp, 20); ctx.restore();
+    font('600 30px JBM'); if (u > 0.45) txt(typed('reasoning is built in ✓', prog(u, 0.45, 0.8)), W / 2, y + 90, C.orange, 'center');
+  } else if (i === 2) { // KEEP GOING: never stops scrolling
+    font(`${size}px IDBlack`); const w = ctx.measureText(k + '   →   ').width;
+    const off = (u * 900) % w;
+    ctx.globalAlpha = clamp(p * 3);
+    for (let x = -off - w; x < W + w; x += w) txt(k + '   →   ', x, y, C.orange, 'left');
+    font('600 26px JBM'); [0.25, 0.5, 0.75].forEach((f, j) => { const dx = W * f; ctx.fillStyle = u * 2 > j * 0.3 ? C.cream : 'rgba(240,238,230,0.2)'; ctx.beginPath(); ctx.arc(dx, y + 90, 10, 0, 6.283); ctx.fill(); });
+    txt('check-in ≠ finish line', W / 2, y + 150, C.dim, 'center');
+  } else if (i === 3) { // FENCE IT: brackets close in
+    font(`${size * 0.8}px IDBlack`); const w = ctx.measureText(k).width;
+    ctx.globalAlpha = clamp(p * 3); txt(k, W / 2, y, C.cream, 'center');
+    const c = eOutBack(prog(u, 0.1, 0.4), 1.6), gap = lerp(700, 40, c);
+    font(`${size}px IDBlack`); txt('<', W / 2 - w / 2 - gap, y + 10, C.orange, 'right'); txt('>', W / 2 + w / 2 + gap, y + 10, C.orange, 'left');
+    font('600 26px JBM'); txt(typed('<email> … </email>   <doc> … </doc>', prog(u, 0.4, 0.8)), W / 2, y + 100, C.dim, 'center');
+  } else if (i === 4) { // JUST SHOW IT: scanned
+    font(`${size}px IDBlack`); const w = ctx.measureText(k).width;
+    ctx.globalAlpha = clamp(p * 3); txt(k, W / 2, y, C.cream, 'center');
+    const sx = W / 2 - w / 2 + (w + 40) * eInOutCubic(prog(u, 0.12, 0.7));
+    ctx.save(); ctx.beginPath(); ctx.rect(W / 2 - w / 2 - 20, y - size, sx - (W / 2 - w / 2 - 20), size * 1.2); ctx.clip(); txt(k, W / 2, y, C.orange, 'center'); ctx.restore();
+    if (u > 0.12 && u < 0.72) { ctx.fillStyle = C.cream; ctx.fillRect(sx, y - size * 0.85, 4, size * 1.05); }
+    font('600 26px JBM'); txt('screenshots · diagrams · charts', W / 2, y + 90, C.dim, 'center');
+  } else { // SAY NO: bans stack up
+    font('360px IDBlack'); const s = lerp(1.5, 1, eOutExpo(p)); ctx.save(); ctx.translate(560, y + 60); ctx.scale(s, s); txt('NO', 0, 0, C.orange, 'center'); ctx.restore();
+    ['purple gradients', 'centered hero', 'emoji icons'].forEach((b, j) => {
+      const q = prog(u, 0.15 + j * 0.15, 0.35 + j * 0.15); if (q <= 0) return;
+      font('80px IDBlack'); ctx.save(); ctx.globalAlpha = eOutCubic(q); txt(b, 900 + (1 - eOutExpo(q)) * 80, 420 + j * 120, C.cream); ctx.restore();
+    });
+  }
+  ctx.restore();
+}
+function tipScene(t) {
+  const i = clamp(Math.floor((t - T_TIP0) / TIP_DUR), 0, N - 1), u = t - TIP_T(i);
+  // ghost number
+  font('900px IDBlack'); ctx.save(); ctx.globalAlpha = 0.05; ctx.strokeStyle = C.cream; ctx.lineWidth = 3; ctx.textAlign = 'right'; ctx.strokeText(pad2(i + 1), W + 40, H + 120); ctx.restore();
+  font('600 26px JBM'); txt(`TIP ${pad2(i + 1)} / 06`, 120, 170, C.orange);
+  font('46px IDBold'); maskRise(TIPS[i][0], 120, 240, prog(u, 0.05, 0.3), C.cream, 46);
+  ctx.fillStyle = rgba(C.orange, 0.6); ctx.fillRect(120, 270, 200 * eOutExpo(prog(u, 0.1, 0.4)), 4);
+  performKey(i, t, u);
+  font('32px IDMed'); const lines = wrap(TIPS[i][1], 1500);
+  lines.forEach((l, k) => maskRise(l, W / 2, 860 + k * 44, prog(u, 0.3 + k * 0.06, 0.55 + k * 0.06), rgba(C.cream, 0.78), 32, 'center'));
+  // cut flash band on every tip start
+  const cp = prog(u, 0, 0.12); if (cp < 1) { ctx.fillStyle = C.orange; ctx.fillRect(0, lerp(-200, H, cp), W, 200 * (1 - cp)); }
+}
+function recap(t) {
+  const u = t - T_FULL;
+  font('600 26px JBM'); txt('THE SIX RULES', 120, 170, C.orange);
+  KEYS.forEach((k, i) => {
+    const p = prog(u, i * 0.05, 0.2 + i * 0.05); if (p <= 0) return;
+    const y = 280 + i * 120;
+    font('600 34px JBM'); txt(pad2(i + 1), 120 + (1 - eOutExpo(p)) * -100, y, C.orange);
+    font('96px IDBlack'); maskRise(k, 220, y + 14, p, i % 2 ? C.cream : C.orange, 96);
+    font('30px IDMed'); txt(TIPS[i][0], W - 120, y, rgba(C.cream, 0.6 * eOutCubic(p)), 'right');
+  });
+}
+function outro(t) {
+  const u = t - T_OUT;
+  font('380px IDBlack');
+  const p = prog(u, 0, 0.25);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2 - 60, 620); const s = lerp(1.6, 1, eOutExpo(p)); ctx.scale(s, s); txt('SAVE THIS', 0, 0, C.cream, 'center'); ctx.restore(); }
+  font('380px IDBlack'); const w = ctx.measureText('SAVE THIS').width;
+  spark(W / 2 - 60 + w / 2 + 80, 560, 70, prog(u, 0.2, 0.6), t * 1.5, C.orange);
+  font('italic 64px NR'); maskRise('opus 5.5 rewards less, but sharper, prompting.', W / 2, 780, prog(u, 0.45, 0.75), C.orange, 64, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 870, C.cream, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  for (let i = 0; i < N; i++) if (t >= TIP_T(i)) shake = Math.max(shake, 0.5 * Math.exp(-(t - TIP_T(i)) * 12));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 26 * shake, (hash(frame + 5) - 0.5) * 26 * shake);
+  if (t < T_DROP) intro(t); else if (t < T_TIP0) title(t); else if (t < T_FULL) tipScene(t); else if (t < T_OUT) recap(t); else outro(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '217,119,87', 0.6], [T_FULL, '240,238,230', 0.4], [T_OUT, '217,119,87', 0.6]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

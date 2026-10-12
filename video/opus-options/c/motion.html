@@ -1,0 +1,163 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Opus Cheatsheet C</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option C: "Sunburst" - six of the spark's twelve rays carry the six tips; the burst turns like a dial.
+const DEG = Math.PI / 180;
+const T_SET = 3.15;           // spark slides down into dial position
+function tipPos(t) {
+  if (t < T_TIP0) return -1 + eInOutCubic(prog(t, T_SET, T_TIP0));
+  const k = (t - T_TIP0) / TIP_DUR, i = Math.floor(k), f = k - i;
+  if (i >= N - 1) return N - 1;
+  return i + eInOutCubic(clamp((f - 0.8) / 0.2));
+}
+function stateAt(t) {
+  const down = eInOutCubic(prog(t, T_SET, T_TIP0)), back = eInOutCubic(prog(t, T_FULL, T_FULL + 0.45));
+  const s = tipPos(t);
+  const rot = -90 * DEG - s * 60 * DEG + (t < T_SET ? t * 0.5 : 0) * (1 - down) + (t > T_FULL ? (t - T_FULL) * 0.25 : 0);
+  return {
+    s, rot, back,
+    cx: W / 2, cy: lerp(lerp(540, 1330, down), 545, back),
+    len: lerp(lerp(t < T_DROP ? 0.3 * eOutBack(prog(t, 0.05, 0.9), 1.6) : 0.75, 1, down), 0.26, back),
+    D: lerp(850, 330, back),
+  };
+}
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 5);
+  const g = ctx.createRadialGradient(W / 2, H, 0, W / 2, H, 1300);
+  g.addColorStop(0, rgba(C.orange, 0.12 + pk * 0.05)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // concentric dial rings
+  ctx.save(); ctx.strokeStyle = 'rgba(240,238,230,0.05)'; ctx.lineWidth = 1.5;
+  const st = stateAt(t);
+  for (let r = 200; r < 1600; r += 130) { ctx.beginPath(); ctx.arc(st.cx, st.cy, r * (0.5 + st.len * 0.5), 0, 6.283); ctx.stroke(); }
+  ctx.restore();
+}
+
+// custom sunburst: 12 rays, the even ones are the tip rays
+function sunburst(t, st, alpha = 1) {
+  const act = clamp(Math.round(st.s), 0, N - 1), pk = pulseAt(t, 10);
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.lineCap = 'round';
+  for (let k = 0; k < 12; k++) {
+    const tipRay = k % 2 === 0, ti = k / 2;
+    const a = k * 30 * DEG + st.rot + RAY_J[k];
+    const isAct = tipRay && ti === act && t >= T_TIP0 - 0.2 && st.back < 0.5;
+    const L = (tipRay ? 760 : 520) * RAY_L[k] ** 0.3 * st.len * (isAct ? 1.06 + pk * 0.04 : 1);
+    const w = (tipRay ? 52 : 40) * Math.max(st.len, 0.5);
+    const ca = Math.cos(a), sa = Math.sin(a);
+    // tapered ray
+    ctx.fillStyle = tipRay ? (isAct ? C.orange : rgba(C.orange, st.back > 0.5 ? 1 : 0.55)) : rgba(C.cream, st.back > 0.5 ? 0.9 : 0.16);
+    if (st.back > 0.5 && !tipRay) ctx.fillStyle = rgba(C.orange, 0.9);
+    const px = -sa, py = ca, w0 = w * 0.6, w1 = w * 0.38;
+    ctx.beginPath(); ctx.moveTo(st.cx + px * w0, st.cy + py * w0);
+    ctx.lineTo(st.cx + ca * L + px * w1, st.cy + sa * L + py * w1);
+    ctx.arc(st.cx + ca * L, st.cy + sa * L, w1, a + Math.PI / 2, a - Math.PI / 2, true);
+    ctx.lineTo(st.cx - px * w0, st.cy - py * w0); ctx.closePath(); ctx.fill();
+    if (isAct) { // glow
+      ctx.save(); ctx.globalAlpha *= 0.25; ctx.strokeStyle = C.orange; ctx.lineWidth = w * 2.2;
+      ctx.beginPath(); ctx.moveTo(st.cx, st.cy); ctx.lineTo(st.cx + ca * L, st.cy + sa * L); ctx.stroke(); ctx.restore();
+    }
+    // number at the ray tip (tip rays only, dial mode)
+    if (tipRay && st.back < 0.5 && t >= T_SET) {
+      font('600 30px JBM'); txt(pad2(ti + 1), st.cx + ca * (L + 50), st.cy + sa * (L + 50) + 10, isAct ? C.cream : C.dim, 'center');
+    }
+  }
+  ctx.fillStyle = C.orange; ctx.beginPath(); ctx.arc(st.cx, st.cy, 110 * Math.max(st.len, 0.6), 0, 6.283); ctx.fill();
+  ctx.restore();
+}
+
+function tipCard(t, st, i, a) {
+  const x = st.cx + Math.cos(a) * st.D, y = st.cy + Math.sin(a) * st.D;
+  const off = Math.abs(((a + 90 * DEG + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI); // distance from top
+  if (st.back < 0.5) {
+    const vis = clamp(1 - off / (60 * DEG) * 0.85);
+    if (vis <= 0.05) return;
+    const active = off < 10 * DEG && t >= T_TIP0;
+    const u = active ? t - TIP_T(i) : 1;
+    ctx.save(); ctx.globalAlpha *= vis * clamp((t - T_SET) * 4);
+    // dark halo for legibility
+    const g = ctx.createRadialGradient(x, y - 200, 0, x, y - 200, 560); g.addColorStop(0, 'rgba(0,0,0,0.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - 700, y - 600, 1400, 1000);
+    const sc = active ? 1 : 0.55; ctx.translate(x, y - 60); ctx.scale(sc, sc);
+    font('600 26px JBM'); txt(`TIP ${pad2(i + 1)} / 06`, 0, -250, C.orange, 'center');
+    font('86px IDBlack'); const tl = wrap(TIPS[i][0], 1300);
+    tl.forEach((l, k) => maskRise(l, 0, -160 + k * 94, active ? prog(u, 0.02 + k * 0.05, 0.25 + k * 0.05) : 1, C.cream, 86, 'center'));
+    if (active) {
+      font('38px IDMed'); const bl = wrap(TIPS[i][1], 1300);
+      const by = -160 + tl.length * 94 + 34;
+      bl.forEach((l, k) => maskRise(l, 0, by + k * 52, prog(u, 0.15 + k * 0.06, 0.4 + k * 0.06), rgba(C.cream, 0.85), 38, 'center'));
+    }
+    ctx.restore();
+  } else {
+    // recap: compact labels around the spark
+    const q = prog(st.back, 0.5, 1);
+    ctx.save(); ctx.globalAlpha *= q;
+    a = i * 60 * DEG - 30 * DEG; // pinned layout while the spark keeps turning
+    const lx = st.cx + Math.cos(a) * (st.D + 190), ly = st.cy + Math.sin(a) * (st.D + 20);
+    const al = Math.cos(a) > 0.3 ? 'left' : Math.cos(a) < -0.3 ? 'right' : 'center';
+    font('600 24px JBM'); txt(pad2(i + 1), lx, ly - 36, C.orange, al);
+    font('36px IDBlack'); wrap(TIPS[i][0], al === 'center' ? 560 : 380).slice(0, 3).forEach((l, k) => txt(l, lx, ly + k * 42, C.cream, al));
+    ctx.restore();
+  }
+}
+
+function intro(t) {
+  font('600 30px JBM');
+  const s = 'Anthropic just published its official prompting guide for…', p = prog(t, 0.3, 1.5);
+  if (p > 0) txt(typed(s, p), W / 2, 900, C.cream, 'center');
+}
+function title(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_SET - 0.1, T_SET + 0.2));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  const g = ctx.createRadialGradient(W / 2, 540, 0, W / 2, 540, 800); g.addColorStop(0, 'rgba(0,0,0,0.8)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  font('300px IDBlack'); const p = prog(u, 0, 0.25);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 560); const sc = lerp(1.6, 1, eOutExpo(p)); ctx.scale(sc, sc); txt('OPUS 5.5', 0, 0, C.cream, 'center'); ctx.restore(); }
+  font('90px IDBlack'); maskRise('PROMPTING CHEATSHEET', W / 2, 690, prog(u, 0.4, 0.65), C.orange, 90, 'center');
+  ctx.restore();
+}
+function recapText(t) {
+  if (t < T_FULL) return;
+  const u = t - T_FULL;
+  font('600 26px JBM'); txt(typed('OPUS 5.5 · PROMPTING CHEATSHEET', prog(u, 0.3, 0.7)), W / 2, 120, C.orange, 'center');
+  if (t >= T_OUT) {
+    const v = t - T_OUT, bp = eOutExpo(prog(v, 0.2, 0.5)), w = 980 * bp;
+    roundRect(W / 2 - w / 2, 960, w, 70, 35); ctx.fillStyle = C.orange; ctx.fill();
+    if (bp > 0.6) { font('34px IDBlack'); txt('SAVE THIS', W / 2 - 170, 1007, '#000', 'center'); font('600 26px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(v, 0.4, 0.8)), W / 2 - 40, 1004, '#000', 'left'); }
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  const st = stateAt(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 22 * shake, (hash(frame + 5) - 0.5) * 22 * shake);
+  sunburst(t, st, t < T_DROP ? 1 : t < T_SET ? 0.45 : 1);
+  if (t >= T_SET - 0.05) for (let i = 0; i < N; i++) tipCard(t, st, i, i * 60 * DEG + st.rot + RAY_J[i * 2]);
+  if (t < T_DROP) intro(t); else if (t < T_SET + 0.2) title(t);
+  recapText(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '217,119,87', 0.6], [T_FULL, '240,238,230', 0.35], [T_OUT, '217,119,87', 0.5]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

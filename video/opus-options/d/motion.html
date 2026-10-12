@@ -1,0 +1,182 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Opus Cheatsheet D</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option D: "Editor" - the cheatsheet is typed live into a markdown file with inline preview.
+const WIN = { x: 70, y: 90, w: W - 140, h: H - 170 };
+const GUT = 110, VIEW_TOP = WIN.y + 96, VIEW_H = WIN.h - 96 - 46, TX = WIN.x + GUT + 30, MAXW = 1470;
+
+// ---------- document model: rendered lines with their own fonts ----------
+const DOC = [];
+function addLine(kind, text, opts = {}) { DOC.push({ kind, text, ...opts }); }
+function buildDoc() {
+  addLine('h1', 'Opus 5.5 Prompting Cheatsheet', { pre: '# ', fnt: '76px IDBlack', h: 112, t0: T_DROP, t1: T_DROP + 0.01 });
+  addLine('quote', 'Anthropic just published its official prompting guide for Opus 5.5.', { pre: '> ', fnt: 'italic 40px NR', h: 68, t0: 0.9, t1: 1.9 });
+  addLine('hr', '', { h: 40, t0: 3.0, t1: 3.2 });
+  TIPS.forEach(([title, body], i) => {
+    const t0 = TIP_T(i);
+    addLine('h2', title, { pre: '## ', num: pad2(i + 1), fnt: '60px IDBlack', h: 92, t0, t1: t0 + 0.25, tip: i });
+    font('38px IDMed');
+    const lines = wrap(body, MAXW);
+    const total = lines.join(' ').length; let acc = 0;
+    lines.forEach((l, k) => {
+      const a = acc / total, b = (acc + l.length) / total; acc += l.length + 1;
+      addLine('p', l, { pre: k === 0 ? '- ' : '  ', fnt: '38px IDMed', h: 54, t0: t0 + 0.28 + a * 0.85, t1: t0 + 0.28 + b * 0.85, tip: i });
+    });
+    addLine('gap', '', { h: 36, t0, t1: t0 });
+  });
+  let y = 0; DOC.forEach(l => { l.y = y; y += l.h; });
+  return y;
+}
+let DOC_H = 0;
+
+// h1 is "inserted" above the quote at the drop: until then the quote sits on top
+function lineY(l, t) {
+  const ins = eOutExpo(prog(t, T_DROP, T_DROP + 0.3));
+  if (l.kind === 'quote') return lerp(0, l.y, ins);
+  return l.y;
+}
+function scrollAt(t) {
+  const target = i => clamp(DOC.find(l => l.kind === 'h2' && l.tip === i).y - VIEW_H * 0.48, 0, DOC_H - VIEW_H + 40);
+  if (t < TIP_T(0) - 0.25) return 0;
+  if (t >= T_FULL) return lerp(target(N - 1), 0, eInOutCubic(prog(t, T_FULL, T_FULL + 0.5)));
+  const i = clamp(Math.floor((t - (TIP_T(0) - 0.25)) / TIP_DUR), 0, N - 1), t0 = TIP_T(i) - 0.25;
+  const from = i === 0 ? 0 : target(i - 1);
+  return lerp(from, target(i), eInOutCubic(prog(t, t0, t0 + 0.4)));
+}
+function zoomAt(t) { return lerp(1, VIEW_H / (DOC_H + 40), eInOutCubic(prog(t, T_FULL, T_FULL + 0.5))); }
+
+function typedLen(l, t) { return l.t1 <= l.t0 ? (t >= l.t0 ? l.text.length : 0) : Math.round(l.text.length * prog(t, l.t0, l.t1)); }
+function activeLine(t) { let a = null; for (const l of DOC) if (t >= l.t0 && l.kind !== 'gap') a = l; return a; }
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W * 0.5, -100, 0, W * 0.5, -100, 1400);
+  g.addColorStop(0, rgba(C.orange, 0.12 + pulseAt(t, 5) * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function windowFrame(t, open) {
+  const s = lerp(0.6, 1, eOutBack(open, 1.4));
+  ctx.translate(W / 2, H / 2); ctx.scale(s, s); ctx.translate(-W / 2, -H / 2); ctx.globalAlpha *= clamp(open * 2);
+  roundRect(WIN.x, WIN.y, WIN.w, WIN.h, 20); ctx.fillStyle = '#0B0908'; ctx.fill();
+  ctx.strokeStyle = rgba(C.orange, 0.3 + pulseAt(t, 8) * 0.2); ctx.lineWidth = 2; ctx.stroke();
+  // title bar + tab
+  ctx.save(); roundRect(WIN.x, WIN.y, WIN.w, 56, 20); ctx.clip(); ctx.fillStyle = '#15110F'; ctx.fillRect(WIN.x, WIN.y, WIN.w, 56); ctx.restore();
+  ['#FF5F57', '#FEBC2E', '#28C840'].forEach((c, i) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(WIN.x + 30 + i * 26, WIN.y + 28, 8, 0, 6.283); ctx.fill(); });
+  ctx.fillStyle = '#0B0908'; roundRect(WIN.x + 130, WIN.y + 12, 420, 44, 10); ctx.fill();
+  ctx.fillStyle = C.orange; ctx.fillRect(WIN.x + 130, WIN.y + 12, 420, 3);
+  font('600 20px JBM'); const name = typed('opus-5.5-prompting.md', prog(t, 0.2, 0.7));
+  txt(name, WIN.x + 160, WIN.y + 41, C.cream);
+  const saved = t >= T_FULL + 0.1;
+  ctx.fillStyle = saved ? '#28C840' : C.orange; ctx.beginPath(); ctx.arc(WIN.x + 525, WIN.y + 34, 6, 0, 6.283); ctx.fill();
+  // gutter + status bar
+  ctx.fillStyle = '#0F0C0B'; ctx.fillRect(WIN.x + 2, WIN.y + 56, GUT, WIN.h - 102);
+  ctx.save(); roundRect(WIN.x, WIN.y + WIN.h - 46, WIN.w, 46, 20); ctx.clip(); ctx.fillStyle = '#15110F'; ctx.fillRect(WIN.x, WIN.y + WIN.h - 46, WIN.w, 46); ctx.restore();
+  ctx.fillStyle = C.orange; ctx.fillRect(WIN.x, WIN.y + WIN.h - 46, 130, 46);
+  const al = activeLine(t), tipNow = al && al.tip !== undefined ? al.tip + 1 : 0;
+  font('600 18px JBM'); txt(saved ? 'SAVED' : 'INSERT', WIN.x + 65, WIN.y + WIN.h - 17, '#000', 'center');
+  txt(`Markdown  ·  UTF-8  ·  Ln ${al ? DOC.indexOf(al) + 1 : 1}, Col ${al ? typedLen(al, t) + 1 : 1}`, WIN.x + 160, WIN.y + WIN.h - 17, C.dim);
+  txt(`tips ${tipNow}/06`, WIN.x + WIN.w - 30, WIN.y + WIN.h - 17, C.orange, 'right');
+}
+
+function docView(t) {
+  const sc = scrollAt(t), z = zoomAt(t), al = activeLine(t);
+  ctx.save(); ctx.beginPath(); ctx.rect(WIN.x, VIEW_TOP - 30, WIN.w - 120, VIEW_H + 30); ctx.clip();
+  ctx.translate(TX, VIEW_TOP); ctx.scale(z, z); ctx.translate(0, -sc);
+  DOC.forEach((l, idx) => {
+    if (t < l.t0 && !(l.kind === 'quote')) return;
+    if (l.kind === 'quote' && t < l.t0) return;
+    const y = lineY(l, t), n = typedLen(l, t), base = y + l.h * 0.72;
+    // line number
+    font('400 20px JBM'); txt(String(idx + 1), -48, base - 2, al === l ? C.cream : rgba(C.dim, 0.7), 'right');
+    if (al === l && z > 0.9) { ctx.fillStyle = 'rgba(217,119,87,0.07)'; ctx.fillRect(-GUT - 30, y, WIN.w, l.h); }
+    if (l.kind === 'hr') { ctx.fillStyle = rgba(C.orange, 0.5); ctx.fillRect(0, y + l.h / 2, MAXW * eOutExpo(prog(t, l.t0, l.t1 + 0.3)), 2); return; }
+    if (l.kind === 'gap') return;
+    let x = 0;
+    font('600 30px JBM'); txt(l.pre, x, base, rgba(C.dim, 0.8)); x += ctx.measureText(l.pre).width;
+    if (l.num) { font('600 50px JBM'); txt(l.num, x, base, C.orange); x += ctx.measureText(l.num).width + 18; }
+    const shown = l.text.slice(0, n);
+    font(l.fnt);
+    if (l.kind === 'h1') {
+      // slam in at the drop, "Opus 5.5" in orange
+      const p = prog(t, T_DROP, T_DROP + 0.25);
+      ctx.save(); ctx.translate(x, base); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s);
+      txt('Opus 5.5', 0, 0, C.orange); const w = ctx.measureText('Opus 5.5 ').width; txt('Prompting Cheatsheet', w, 0, C.cream); ctx.restore();
+      x += 0;
+    } else {
+      const col = l.kind === 'quote' ? rgba(C.cream, 0.7) : l.kind === 'h2' ? C.cream : rgba(C.cream, 0.85);
+      // highlight quoted phrases inside body text
+      if (l.kind === 'p' && /“/.test(shown)) {
+        let inQ = false; for (const ch of shown) { if (ch === '“') inQ = true; txt(ch, x, base, inQ ? C.orange : col); x += ctx.measureText(ch).width; if (ch === '”') inQ = false; }
+      } else { txt(shown, x, base, col); x += ctx.measureText(shown).width; }
+    }
+    if (al === l && (n < l.text.length || Math.floor(t * 4) % 2 === 0) && t < T_FULL) {
+      ctx.fillStyle = C.orange; ctx.fillRect(x + 4, y + l.h * 0.15, 4, l.h * 0.7);
+    }
+  });
+  ctx.restore();
+  const fg = ctx.createLinearGradient(0, WIN.y + 56, 0, WIN.y + 140); fg.addColorStop(0, '#0B0908'); fg.addColorStop(1, 'rgba(11,9,8,0)');
+  ctx.fillStyle = fg; ctx.fillRect(WIN.x + GUT + 2, WIN.y + 56, WIN.w - GUT - 130, 84);
+  // minimap
+  const mx = WIN.x + WIN.w - 100, my = VIEW_TOP, ms = VIEW_H / (DOC_H + 40);
+  DOC.forEach(l => { if (t < l.t0 || l.kind === 'gap') return; const w = l.kind === 'hr' ? 70 : Math.min(70, typedLen(l, t) * (l.kind === 'p' ? 0.6 : 1.4)); ctx.fillStyle = l.kind === 'h2' || l.kind === 'h1' ? rgba(C.orange, 0.8) : 'rgba(240,238,230,0.35)'; ctx.fillRect(mx, my + lineY(l, t) * ms, w, Math.max(2, l.h * ms * 0.5)); });
+  ctx.strokeStyle = rgba(C.orange, 0.6); ctx.lineWidth = 1.5; ctx.strokeRect(mx - 6, my + sc * ms, 84, Math.min(VIEW_H, VIEW_H / z) * ms);
+}
+
+function overlays(t) {
+  // tip counter chip that pops on each new tip
+  for (let i = 0; i < N; i++) {
+    const p = prog(t, TIP_T(i), TIP_T(i) + 0.9); if (p <= 0 || p >= 1) continue;
+    const a = Math.sin(p * Math.PI);
+    ctx.save(); ctx.globalAlpha = a; font('600 22px JBM');
+    roundRect(WIN.x + WIN.w - 330, WIN.y + 70, 200, 44, 22); ctx.fillStyle = C.orange; ctx.fill();
+    txt(`TIP ${pad2(i + 1)} / 06`, WIN.x + WIN.w - 230, WIN.y + 99, '#000', 'center'); ctx.restore();
+  }
+  if (t >= T_FULL) {
+    const u = t - T_FULL, p = eOutBack(prog(u, 0.1, 0.4), 2);
+    ctx.save(); ctx.translate(W - 330, 160); ctx.scale(p, p);
+    roundRect(-200, -34, 400, 68, 16); ctx.fillStyle = '#15110F'; ctx.fill(); ctx.strokeStyle = '#28C840'; ctx.lineWidth = 2; ctx.stroke();
+    font('600 22px JBM'); txt('✓ saved · 6 tips', 0, 8, '#28C840', 'center'); ctx.restore();
+  }
+  if (t >= T_OUT) {
+    const u = t - T_OUT;
+    ctx.fillStyle = `rgba(0,0,0,${0.75 * eOutCubic(prog(u, 0, 0.4))})`; ctx.fillRect(0, 0, W, H);
+    spark(W / 2, 330, 110, prog(u, 0.05, 0.6), t * 0.8, C.orange);
+    font('170px IDBlack'); const p = prog(u, 0.2, 0.45);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 640); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('SAVE THIS FILE.', 0, 0, C.cream, 'center'); ctx.restore(); }
+    font('italic 60px NR'); maskRise('six rules for prompting opus 5.5', W / 2, 740, prog(u, 0.5, 0.8), C.orange, 60, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 830, C.cream, 'center');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 20 * shake, (hash(frame + 5) - 0.5) * 20 * shake);
+  windowFrame(t, prog(t, 0, 0.45));
+  docView(t);
+  ctx.restore();
+  overlays(t);
+  flashes(t, [[T_DROP, '217,119,87', 0.45], [T_FULL, '40,200,64', 0.15], [T_OUT, '217,119,87', 0.4]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => { DOC_H = buildDoc(); render(0, 0); });
+</script>
+</body>
+</html>
