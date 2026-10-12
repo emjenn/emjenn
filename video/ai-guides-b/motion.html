@@ -1,0 +1,260 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>14 AI Guides B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// Option B: "Flash Cuts" - Swiss-poster kinetic type, a hard cut on every beat.
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const P = { lime: '#C6FF3D', violet: '#7B5CFF', white: '#F4F4EE', grey: '#77776F' };
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+
+const BEAT = 0.5, T_DROP = 2, T_LIST = 4.5, N = 14, T_INDEX = 11.5, T_OUT = 13, DUR = 15;
+const HITS = [2, 2.5, 3, 3.5, 4]; for (let i = 0; i < N; i++) HITS.push(T_LIST + i * BEAT); HITS.push(11.5, 12, 12.5, 13);
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(7);
+const pad2 = n => String(n).padStart(2, '0');
+function pulseAt(t, d = 8) { let p = 0; for (const k of HITS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * d)); return p; }
+function font(f) { ctx.font = f; }
+function txt(s, x, y, c, al = 'left', base = 'alphabetic') { ctx.fillStyle = c; ctx.textAlign = al; ctx.textBaseline = base; ctx.fillText(s, x, y); }
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+function fit(s, fam, size, maxW, min = 20) { font(`${size}px ${fam}`); while (ctx.measureText(s).width > maxW && size > min) { size -= 4; font(`${size}px ${fam}`); } return size; }
+// slide-in from a direction with a hard expo ease, clipped to its own box
+function slam(s, x, y, p, color, size, al = 'left', dir = 'up') {
+  if (p <= 0) return;
+  const w = ctx.measureText(s).width, x0 = al === 'left' ? x : al === 'center' ? x - w / 2 : x - w;
+  const e = eOutExpo(p);
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 40, y - size * 0.95, w + 80, size * 1.2); ctx.clip();
+  const dx = dir === 'left' ? -(1 - e) * (w + 80) : dir === 'right' ? (1 - e) * (w + 80) : 0;
+  const dy = dir === 'up' ? (1 - e) * size : dir === 'down' ? -(1 - e) * size : 0;
+  txt(s, x + dx, y + dy, color, al);
+  ctx.restore();
+}
+
+const GUIDES = [
+  ['Jev', 'ruben.substack.com/p/jev'],
+  ['Learn AI in 23 min', 'ruben.substack.com/p/pareto'],
+  ['AI privacy', 'ruben.substack.com/p/privacy'],
+  ['Switch to Claude', 'ruben.substack.com/p/how-to-switch-ai'],
+  ['GPT-6 vs Fable 5.1', 'ruben.substack.com/p/sorry-claude'],
+  ['Claude Skills', 'ruben.substack.com/p/give-ai-a-fish-and-you-feed-it-for'],
+  ['Claude for mom', 'ruben.substack.com/p/my-mother-and-claude'],
+  ['AI brain rot', 'ruben.substack.com/p/thinking-is-now-cheap'],
+  ['Free AI tools', 'ruben.substack.com/p/if-i-had-absolutely-no-money-id-use'],
+  ['Prompting 101', 'ruben.substack.com/p/how-to-ask-ai-once'],
+  ['Cowork setup', 'ruben.substack.com/p/you-need-to-stop-overthinking-cowork'],
+  ['Deslop Claude', 'ruben.substack.com/p/how-to-deslop-claude-in-2-words'],
+  ['Vibecoding', 'ruben.substack.com/p/the-claude-code-bible'],
+  ['Stop hitting limits', 'ruben.substack.com/p/how-to-stop-hit'],
+];
+
+const grains = [];
+for (let i = 0; i < 6; i++) {
+  const g = document.createElement('canvas'); g.width = W / 2; g.height = H / 2;
+  const gx = g.getContext('2d'); const im = gx.createImageData(g.width, g.height);
+  for (let j = 0; j < im.data.length; j += 4) { const v = rnd() * 255; im.data[j] = im.data[j + 1] = im.data[j + 2] = v; im.data[j + 3] = 16; }
+  gx.putImageData(im, 0, 0); grains.push(g);
+}
+
+// Swiss grid: 12 columns + baseline rows
+function grid(t, a) {
+  if (a <= 0) return;
+  ctx.save(); ctx.strokeStyle = `rgba(244,244,238,${0.07 * a})`; ctx.lineWidth = 1;
+  const cw = (W - 160) / 12;
+  for (let i = 0; i <= 12; i++) { const p = eOutExpo(prog(t, 0.05 + i * 0.03, 0.6 + i * 0.03)); const x = 80 + i * cw; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H * p); ctx.stroke(); }
+  for (let j = 1; j < 6; j++) { const p = eOutExpo(prog(t, 0.2 + j * 0.05, 0.8 + j * 0.05)); const y = j * H / 6; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W * p, y); ctx.stroke(); }
+  ctx.restore();
+}
+
+// scrolling marquee band
+function marquee(y, h, s, speed, t, fg, bg, size) {
+  ctx.save();
+  if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, y, W, h); }
+  ctx.beginPath(); ctx.rect(0, y, W, h); ctx.clip();
+  font(`${size}px IDBlack`);
+  const w = ctx.measureText(s).width;
+  let x = -((t * speed) % w + w) % w;
+  for (; x < W; x += w) txt(s, x, y + h / 2 + size * 0.36, fg);
+  ctx.restore();
+}
+
+function watermark() {
+  const s = 'x.com/nrqa__';
+  font('500 24px IDMed');
+  txt(s, 56, 62, 'rgba(244,244,238,0.45)', 'left', 'middle');
+  txt(s, W - 56, H - 50, 'rgba(244,244,238,0.45)', 'right', 'middle');
+  font('500 30px IDMed');
+  txt(s, W / 2, H / 2, 'rgba(244,244,238,0.16)', 'center', 'middle');
+}
+
+// ---------- intro 0-2 ----------
+function intro(t) {
+  grid(t, 1);
+  font('600 22px JBM');
+  const labels = [['VOL. 01', 120, 150], ['READING LIST', 1500, 150], ['x14', 120, 960], ['2026', 1650, 960], ['AI / GUIDES', 820, 150]];
+  labels.forEach(([s, x, y], i) => { const p = prog(t, 0.3 + i * 0.1, 0.5 + i * 0.1); if (p > 0) txt(typed(s, p), x, y, i % 2 ? P.lime : P.white); });
+  // echo-stacked 14: outline copies climb up then the filled one lands
+  font('520px IDBlack');
+  for (let k = 7; k >= 0; k--) {
+    const p = prog(t, 0.9 + (7 - k) * 0.08, 1.2 + (7 - k) * 0.08);
+    if (p <= 0) continue;
+    const y = 760 - k * 34 * eOutExpo(p) + (1 - eOutExpo(p)) * 300;
+    ctx.save(); ctx.globalAlpha = (1 - k / 9) * clamp(p * 3) * (k === 0 ? 1 : 0.8);
+    if (k === 0 && t > 1.75) { txt('14', W / 2, y, P.lime, 'center'); }
+    else { ctx.strokeStyle = k % 2 ? P.violet : P.lime; ctx.lineWidth = 3; ctx.textAlign = 'center'; ctx.strokeText('14', W / 2, y); }
+    ctx.restore();
+  }
+}
+
+// ---------- headline 2-4.5: one word-card per beat ----------
+function headline(t) {
+  const i = Math.floor((t - T_DROP) / BEAT), u = (t - T_DROP) - i * BEAT, p = prog(u, 0, 0.18);
+  marquee(70, 70, ' 14 AI GUIDES  ✱  YOU’LL WISH YOU FOUND SOONER  ✱ ', 600, t, '#000', P.lime, 40);
+  marquee(H - 170, 70, ' READ  ✱  SAVE  ✱  SHARE  ✱  REPEAT  ✱ ', -500, t, P.lime, null, 40);
+  if (i === 0) {
+    font('900px IDBlack'); ctx.save(); const s = lerp(1.25, 1, eOutExpo(p)); ctx.translate(W / 2, 860); ctx.scale(s, s);
+    txt('14', 0, 0, P.lime, 'center'); ctx.restore();
+  } else if (i === 1) {
+    font('640px IDBlack'); slam('AI', W / 2, 820, p, P.violet, 640, 'center', 'up');
+  } else if (i === 2) {
+    const sz = fit('GUIDES', 'IDBlack', 520, W - 160); slam('GUIDES', W / 2, 740, p, P.white, sz, 'center', 'left');
+  } else if (i === 3) {
+    font('230px IDBlack'); slam('YOU’LL', 120, 500, p, P.white, 230, 'left', 'left');
+    slam('WISH YOU', W - 120, 760, prog(u, 0.06, 0.24), P.lime, 230, 'right', 'right');
+  } else {
+    const bp = eOutExpo(prog(u, 0, 0.2));
+    ctx.fillStyle = P.lime; ctx.fillRect(0, 300, W * bp, 420);
+    font('300px IDBlack'); slam('FOUND SOONER.', W / 2, 620, prog(u, 0.05, 0.25), '#000', fit('FOUND SOONER.', 'IDBlack', 300, W - 200), 'center', 'up');
+  }
+}
+
+// ---------- guides 4.5-11.5: four rotating layouts ----------
+function guide(t) {
+  const i = clamp(Math.floor((t - T_LIST) / BEAT), 0, N - 1), u = t - T_LIST - i * BEAT;
+  const p = prog(u, 0, 0.16), p2 = prog(u, 0.05, 0.22), up = prog(u, 0.12, 0.42);
+  const [title, url] = GUIDES[i], num = pad2(i + 1), L = i % 4;
+  const acc = i % 2 ? P.violet : P.lime;
+  grid(10, 0.6);
+  if (L === 0) {
+    font('600px IDBlack'); ctx.save(); ctx.strokeStyle = acc; ctx.lineWidth = 5; ctx.textAlign = 'left';
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip(); ctx.strokeText(num, 80 - (1 - eOutExpo(p)) * 400, 640); ctx.restore();
+    const sz = fit(title, 'IDBlack', 200, W - 240); slam(title, W - 120, 820, p2, P.white, sz, 'right', 'up');
+    font('400 28px JBM'); txt(typed('→ ' + url, up), W - 120, 900, P.grey, 'right');
+  } else if (L === 1) {
+    const sz = fit(title, 'IDBlack', 260, W - 200); slam(title, W / 2, 610, p, acc, sz, 'center', 'up');
+    ctx.strokeStyle = P.white; ctx.lineWidth = 3; ctx.strokeRect(120, 180, 170, 110);
+    font('600 64px JBM'); txt(num, 205, 258, P.white, 'center');
+    font('400 28px JBM'); txt(typed(url, up), W / 2, 720, P.grey, 'center');
+  } else if (L === 2) {
+    const bw = W * 0.42 * eOutExpo(p);
+    ctx.fillStyle = acc; ctx.fillRect(0, 0, bw, H);
+    font('560px IDBlack'); ctx.save(); ctx.beginPath(); ctx.rect(0, 0, bw, H); ctx.clip(); txt(num, W * 0.21, 740, '#000', 'center'); ctx.restore();
+    const words = title.split(' ');
+    const sz = Math.min(...words.map(w => fit(w, 'IDBlack', 190, W * 0.5)));
+    font(`${sz}px IDBlack`);
+    const lh = sz * 0.95, y0 = H / 2 - (words.length - 1) * lh / 2 + sz * 0.3;
+    words.forEach((w, k) => slam(w, W * 0.47, y0 + k * lh, prog(u, 0.04 + k * 0.03, 0.2 + k * 0.03), P.white, sz, 'left', 'right'));
+    font('400 24px JBM'); txt(typed(url, up), W * 0.47, Math.min(y0 + (words.length - 1) * lh + 80, 980), P.grey);
+  } else {
+    const words = title.split(' ');
+    const sz = Math.min(...words.map(w => fit(w, 'IDBlack', 210, W * 0.62)));
+    font(`${sz}px IDBlack`);
+    words.forEach((w, k) => slam(w, 120, 230 + sz * 0.75 + k * sz * 0.95, prog(u, k * 0.03, 0.16 + k * 0.03), k % 2 ? acc : P.white, sz, 'left', 'left'));
+    font('700px IDBlack'); ctx.save(); ctx.globalAlpha = 0.9; ctx.strokeStyle = acc; ctx.lineWidth = 4; ctx.textAlign = 'right';
+    ctx.strokeText(num, W - 60, H - 90 + (1 - eOutExpo(p)) * 500); ctx.restore();
+    font('400 26px JBM'); txt(typed(url, up), 120, 910, P.grey);
+  }
+  // persistent HUD: index strip + marquee
+  marquee(0, 56, ' 14 AI GUIDES YOU’LL WISH YOU FOUND SOONER  ✱ ', 300, t, '#000', P.lime, 30);
+  font('600 20px JBM');
+  for (let k = 0; k < N; k++) {
+    const x = 80 + k * ((W - 160) / N), on = k === i, done = k < i;
+    ctx.fillStyle = on ? acc : done ? 'rgba(244,244,238,0.5)' : 'rgba(244,244,238,0.15)';
+    ctx.fillRect(x, H - 110, (W - 160) / N - 10, on ? 8 : 3);
+    if (on) txt(pad2(k + 1), x, H - 122, acc);
+  }
+  // one-frame lime cut bar at each beat
+  if (u < 1 / 30) { ctx.fillStyle = acc; ctx.fillRect(0, hash(i) * H, W, 14); }
+}
+
+// ---------- index 11.5-13 ----------
+function index(t) {
+  const u = t - T_INDEX;
+  grid(10, 0.6);
+  font('120px IDBlack'); slam('THE INDEX', 120, 230, prog(u, 0, 0.25), P.lime, 120, 'left', 'left');
+  font('600 24px JBM'); txt(typed('14 GUIDES / 01 BOOKMARK', prog(u, 0.15, 0.5)), W - 120, 222, P.grey, 'right');
+  ctx.fillStyle = P.white; ctx.fillRect(120, 270, (W - 240) * eOutExpo(prog(u, 0.05, 0.4)), 3);
+  for (let k = 0; k < N; k++) {
+    const col = Math.floor(k / 7), row = k % 7;
+    const x = 120 + col * 860, y = 350 + row * 92;
+    const p = prog(u, 0.08 + k * 0.035, 0.3 + k * 0.035);
+    font('600 30px JBM'); slam(pad2(k + 1), x, y, p, k % 2 ? P.violet : P.lime, 30, 'left', col ? 'right' : 'left');
+    font('58px IDBlack'); slam(GUIDES[k][0], x + 80, y + 6, p, P.white, 58, 'left', col ? 'right' : 'left');
+    ctx.fillStyle = 'rgba(244,244,238,0.12)'; ctx.fillRect(x, y + 28, 780 * eOutExpo(p), 1);
+  }
+}
+
+// ---------- outro 13-15 ----------
+function outro(t) {
+  const u = t - T_OUT;
+  const bp = eOutExpo(prog(u, 0, 0.25));
+  ctx.fillStyle = P.lime; ctx.fillRect(0, 240, W, 460 * bp);
+  font('400px IDBlack'); ctx.save(); ctx.beginPath(); ctx.rect(0, 240, W, 460 * bp); ctx.clip();
+  txt('SAVE IT.', W / 2, 610 + (1 - eOutExpo(prog(u, 0.08, 0.35))) * 400, '#000', 'center'); ctx.restore();
+  marquee(150, 60, ' 14 AI GUIDES  ✱  14 AI GUIDES  ✱ ', 400, t, P.violet, null, 34);
+  font('84px IDBlack'); slam('WHICH ONE FIRST?', W / 2, 840, prog(u, 0.45, 0.7), P.white, 84, 'center', 'up');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.8, 1.2)), W / 2, 920, P.lime, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 14);
+  const shake = t >= T_DROP && t < T_DROP + 0.3 ? (1 - (t - T_DROP) / 0.3) : (t >= T_OUT && t < T_OUT + 0.3 ? 1 - (t - T_OUT) / 0.3 : 0);
+  ctx.save();
+  ctx.translate(W / 2 + (hash(frame) - 0.5) * 30 * shake, H / 2 + (hash(frame + 5) - 0.5) * 30 * shake);
+  ctx.scale(1 + pk * 0.02, 1 + pk * 0.02); ctx.translate(-W / 2, -H / 2);
+  if (t < T_DROP) intro(t);
+  else if (t < T_LIST) headline(t);
+  else if (t < T_INDEX) guide(t);
+  else if (t < T_OUT) index(t);
+  else outro(t);
+  ctx.restore();
+  // invert-flash on the drop and outro
+  for (const h of [T_DROP, T_OUT]) { const p = prog(t, h, h + 0.12); if (p > 0 && p < 1) { ctx.fillStyle = `rgba(198,255,61,${0.7 * (1 - p)})`; ctx.fillRect(0, 0, W, H); } }
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  ctx.fillStyle = P.lime; ctx.fillRect(0, H - 5, W * clamp(t / DUR), 5);
+  watermark();
+  const fo = prog(t, DUR - 0.3, DUR); if (fo > 0) { ctx.fillStyle = `rgba(0,0,0,${fo})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = Promise.all([
+  document.fonts.load('10px IDBlack'), document.fonts.load('10px IDBold'), document.fonts.load('10px IDMed'),
+  document.fonts.load('600 10px JBM'), document.fonts.load('400 10px JBM'),
+]).then(() => { render(0, 0); });
+</script>
+</body>
+</html>
