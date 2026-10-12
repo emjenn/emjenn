@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Second Brain C</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option C: "Shelf" - 20 book spines slide onto a shelf; each is pulled out to show its title and link.
+const SPW = 82, SHELF_Y = 1000, X0 = (W - N * SPW) / 2;
+const SPH = i => 430 + Math.floor(hash(i * 3.7) * 4) * 40;
+const inAt = (t, i) => t >= T_RECAP ? 1 : prog(t, SLOT_T(i) - 0.02, SLOT_T(i) + 0.14);
+const pullAt = (t, i) => (t < T_R0 || t >= T_RECAP) ? 0 : Math.sin(Math.PI * prog(t, SLOT_T(i), SLOT_T(i) + R_DUR)) ;
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, 300, 0, W / 2, 300, 1100);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function shelf(t, a) {
+  ctx.save(); ctx.globalAlpha = a;
+  const sp = eOutExpo(prog(t, 0.1, 0.6));
+  ctx.fillStyle = '#1C1C1C'; ctx.fillRect(W / 2 - (W - 120) / 2 * sp, SHELF_Y, (W - 120) * sp, 18);
+  ctx.fillStyle = '#0E0E0E'; ctx.fillRect(W / 2 - (W - 120) / 2 * sp, SHELF_Y + 18, (W - 120) * sp, 30);
+  for (let i = 0; i < N; i++) {
+    const p = inAt(t, i); if (p <= 0) continue;
+    const h = SPH(i), x = X0 + i * SPW, pull = pullAt(t, i), r = REPOS[i];
+    const y = SHELF_Y - h - (1 - eOutBack(p, 1.3)) * 700 - eOutCubic(pull) * 60;
+    ctx.save(); ctx.globalAlpha *= clamp(p * 3);
+    ctx.fillStyle = i % 3 === 0 ? '#F2F2F2' : i % 3 === 1 ? '#CFCFCF' : '#E3E3E3';
+    roundRect(x + 3, y, SPW - 6, h, 6); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.fillRect(x + 3, y + 26, SPW - 6, 3); ctx.fillRect(x + 3, y + h - 30, SPW - 6, 3);
+    font('600 16px JBM'); txt(r.n, x + SPW / 2, y + 20, '#000', 'center');
+    // vertical title
+    ctx.save(); ctx.translate(x + SPW / 2 + 9, y + h - 44); ctx.rotate(-Math.PI / 2);
+    fit(r.name, 'IDBlack', 28, h - 90, 12); txt(r.name, 0, 0, '#000'); ctx.restore();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+function cover(t) {
+  // the pulled book opens as a big cover in the upper area
+  const i = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), u = t - SLOT_T(i), r = REPOS[i];
+  const p = eOutBack(prog(u, 0, 0.14), 1.5), X = W / 2;
+  ctx.save(); ctx.translate(X, 250); ctx.scale(p, p);
+  roundRect(-760, -170, 1520, 340, 18); ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2; ctx.stroke();
+  font('600 30px JBM'); txt(r.n, 0, -100, C.g2, 'center');
+  const ns = fit(r.name, 'IDBlack', 110, 1400, 50); txt(r.name, 0, -100 + ns + 10, C.white, 'center');
+  font('400 28px JBM'); txt(typed('↳ ' + r.url, prog(u, 0.02, 0.2)), 0, 120, C.g1, 'center');
+  ctx.restore();
+}
+function intro(t) {
+  // single spine taps the shelf, mark appears on it - no words
+  const p = eOutBack(prog(t, 0.4, 0.9), 1.4);
+  ghMark(W / 2, 420, 200 * p, C.white);
+  for (let k = 0; k < 3; k++) { const q = prog(t, 0.9 + k * 0.2, 1.6 + k * 0.2); if (q > 0 && q < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - q})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(W / 2, 420, 120 + q * 300, 0, 6.283); ctx.stroke(); } }
+}
+function closing(t) {
+  // no text: books slide together into a block, the block becomes the mark
+  const u = t - T_OUT, p = eInOutCubic(prog(u, 0.05, 0.6));
+  ctx.save(); ctx.globalAlpha = 1 - eInExpo(prog(u, 0.55, 0.8));
+  for (let i = 0; i < N; i++) {
+    const h = SPH(i), x = lerp(X0 + i * SPW, W / 2 - 160 + (i % 5) * 64, p), y = lerp(SHELF_Y - h, 340 + Math.floor(i / 5) * 90, p), hh = lerp(h, 80, p);
+    ctx.fillStyle = '#E3E3E3'; roundRect(x + 3, y, SPW - 6 - p * 20, hh, 6); ctx.fill();
+  }
+  ctx.restore();
+  const m = eOutBack(prog(u, 0.6, 1.05), 1.8); ghMark(W / 2, 520, 340 * m, C.white);
+  const rp = prog(u, 0.65, 1.4); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(W / 2, 520, 220 + rp * 600, 0, 6.283); ctx.stroke(); }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 16 * shake, (hash(frame + 5) - 0.5) * 16 * shake);
+  if (t < T_DROP) { shelf(t, 1); intro(t); }
+  else if (t < T_OUT) {
+    shelf(t, t < T_R0 ? 0.35 : 1);
+    if (t >= T_R0 && t < T_RECAP) cover(t);
+    titleCard(t, W / 2, 'center');
+  } else closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.2], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

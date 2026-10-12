@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Second Brain A</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option A: "Knowledge Graph" - each project is a node wired to earlier ones; the graph keeps growing.
+const NODES = [];
+(function () {
+  // golden-angle spiral inside an ellipse above the readout band
+  for (let i = 0; i < N; i++) {
+    const a = i * 2.39996 + 0.6, r = Math.sqrt((i + 0.6) / N);
+    NODES.push({ x: 900 + Math.cos(a) * r * 760, y: 420 + Math.sin(a) * r * 340 });
+  }
+  NODES.forEach((n, i) => {
+    const d = NODES.slice(0, i).map((m, j) => [Math.hypot(m.x - n.x, m.y - n.y), j]).sort((a, b) => a[0] - b[0]);
+    n.links = d.slice(0, Math.min(2, d.length)).map(x => x[1]);
+  });
+})();
+const born = (t, i) => t >= T_RECAP ? 1 : prog(t, SLOT_T(i), SLOT_T(i) + 0.2);
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(960, 400, 0, 960, 400, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function graph(t, a, cur) {
+  ctx.save(); ctx.globalAlpha = a;
+  // edges
+  NODES.forEach((n, i) => {
+    const b = born(t, i); if (b <= 0) return;
+    n.links.forEach(j => {
+      const m = NODES[j], p = eOutCubic(b);
+      ctx.strokeStyle = i === cur ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.22)'; ctx.lineWidth = i === cur ? 2.5 : 1.5;
+      ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(lerp(n.x, m.x, p), lerp(n.y, m.y, p)); ctx.stroke();
+      if (b >= 1) { const s = (t * 0.8 + i * 0.13 + j * 0.07) % 1; ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.arc(lerp(n.x, m.x, s), lerp(n.y, m.y, s), 2.5, 0, 6.283); ctx.fill(); }
+    });
+  });
+  // nodes + labels
+  NODES.forEach((n, i) => {
+    const b = born(t, i), act = i === cur;
+    if (b <= 0) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); ctx.arc(n.x, n.y, 4, 0, 6.283); ctx.fill(); return; }
+    const r = (act ? 16 : 9) * eOutBack(b, 2.5);
+    if (act) { const rp = prog(t, SLOT_T(i), SLOT_T(i) + 0.45); ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(n.x, n.y, 16 + rp * 60, 0, 6.283); ctx.stroke(); }
+    ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 6.283); ctx.fill();
+    font(act ? '34px IDBlack' : '24px IDBold');
+    ctx.save(); ctx.globalAlpha *= clamp(b * 2) * (act ? 1 : 0.75);
+    txt(REPOS[i].name, n.x + (act ? 26 : 16), n.y + 7, C.white); ctx.restore();
+  });
+  ctx.restore();
+}
+function intro(t) {
+  // three seed nodes pulse and link, no words
+  const pts = [[760, 440], [1160, 420], [960, 640]];
+  pts.forEach(([x, y], k) => { const p = eOutBack(prog(t, 0.2 + k * 0.25, 0.5 + k * 0.25), 2); ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(x, y, 14 * p, 0, 6.283); ctx.fill(); });
+  for (let k = 0; k < 3; k++) { const [a, b] = [pts[k], pts[(k + 1) % 3]], p = eOutCubic(prog(t, 0.9 + k * 0.15, 1.3 + k * 0.15)); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(lerp(a[0], b[0], p), lerp(a[1], b[1], p)); ctx.stroke(); }
+  ghMark(960, 500, 110 * eOutBack(prog(t, 1.4, 1.9), 2), C.white);
+}
+function closing(t) {
+  // no text: every node collapses into the mark
+  const u = t - T_OUT, p = eInOutCubic(prog(u, 0.05, 0.75));
+  NODES.forEach((n, i) => { const x = lerp(n.x, 960, p), y = lerp(n.y, 520, p); ctx.fillStyle = `rgba(255,255,255,${1 - p * 0.6})`; ctx.beginPath(); ctx.arc(x, y, 8, 0, 6.283); ctx.fill(); });
+  const m = eOutBack(prog(u, 0.65, 1.1), 1.8); ghMark(960, 520, 320 * m, C.white);
+  const rp = prog(u, 0.7, 1.5); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(960, 520, 200 + rp * 600, 0, 6.283); ctx.stroke(); }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 16 * shake, (hash(frame + 5) - 0.5) * 16 * shake);
+  if (t < T_DROP) intro(t);
+  else if (t < T_OUT) {
+    const cur = t >= T_R0 && t < T_RECAP ? clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1) : -1;
+    graph(t, t < T_R0 ? 0.3 : 1, cur);
+    if (cur >= 0) { ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 790, W, 230); readout(cur, 140, 840, t - SLOT_T(cur), 1640, 'left', 84); }
+    titleCard(t);
+  } else closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.2], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

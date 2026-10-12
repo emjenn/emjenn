@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Second Brain B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Vault" - a 5x4 wall of cards; each flips from the mark to its project, then the camera hops on.
+const TW = 340, TH = 200, G = 22, GX = (W - (5 * TW + 4 * G)) / 2, GY = (H - (4 * TH + 3 * G)) / 2;
+const tileC = i => ({ x: GX + (i % 5) * (TW + G) + TW / 2, y: GY + Math.floor(i / 5) * (TH + G) + TH / 2 });
+const OVER = { x: W / 2, y: H / 2, z: 1 };
+const TCAM = i => { const c = tileC(i); return { x: c.x, y: c.y, z: 2.3 }; };
+const flipAt = (t, i) => t >= T_RECAP ? 1 : eInOutCubic(prog(t, SLOT_T(i), SLOT_T(i) + 0.18));
+
+function camAt(t) {
+  const mv = (a, b, p) => ({ x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), z: lerp(a.z, b.z, p) * (1 - 0.18 * Math.sin(Math.PI * p)) });
+  if (t < T_R0 - 0.12) return OVER;
+  if (t < T_RECAP - 0.1) { const i = clamp(Math.floor((t - (T_R0 - 0.12)) / R_DUR), 0, N - 1), t0 = SLOT_T(i) - 0.12; return mv(i === 0 ? OVER : TCAM(i - 1), TCAM(i), eInOutCubic(prog(t, t0, t0 + 0.2))); }
+  return mv(TCAM(N - 1), OVER, eInOutCubic(prog(t, T_RECAP - 0.1, T_RECAP + 0.35)));
+}
+function tile(t, i, act) {
+  const c = tileC(i), drop = eOutBack(prog(t, 0.2 + i * 0.04, 0.55 + i * 0.04), 1.5); if (drop <= 0) return;
+  const f = flipAt(t, i), sx = Math.cos(Math.PI * f), back = sx < 0;
+  ctx.save(); ctx.translate(c.x, c.y); ctx.scale(Math.max(Math.abs(sx), 0.02) * drop, drop);
+  roundRect(-TW / 2, -TH / 2, TW, TH, 16);
+  if (!back) {
+    ctx.fillStyle = '#111'; ctx.fill(); ctx.strokeStyle = '#2C2C2C'; ctx.lineWidth = 2; ctx.stroke();
+    ghMark(0, 0, 70, '#2C2C2C');
+  } else {
+    ctx.fillStyle = act ? C.white : '#EDEDED'; ctx.fill();
+    const r = REPOS[i];
+    font('600 16px JBM'); txt(r.n, -TW / 2 + 18, -TH / 2 + 32, '#555');
+    const lines = (font('30px IDBlack'), wrap(r.name, TW - 36)).slice(0, 2);
+    lines.forEach((l, k) => txt(l, -TW / 2 + 18, -TH / 2 + 80 + k * 34, '#000'));
+    font('400 11px JBM'); fit(r.url, 'JBM', 12, TW - 36, 8); txt(r.url, -TW / 2 + 18, TH / 2 - 20, '#444');
+  }
+  ctx.restore();
+}
+function wall(t, cam) {
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  const cur = t >= T_R0 - 0.12 && t < T_RECAP ? clamp(Math.floor((t - (T_R0 - 0.12)) / R_DUR), 0, N - 1) : -1;
+  for (let i = 0; i < N; i++) if (i !== cur) tile(t, i, false);
+  if (cur >= 0) { const c = tileC(cur); const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 300); g.addColorStop(0, 'rgba(255,255,255,0.25)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(c.x - 320, c.y - 320, 640, 640); tile(t, cur, true); }
+  ctx.restore();
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function closing(t) {
+  // no text: cards rotate shut and collapse into one big mark
+  const u = t - T_OUT, p = eInOutCubic(prog(u, 0.05, 0.7));
+  for (let i = 0; i < N; i++) {
+    const c = tileC(i), x = lerp(c.x, W / 2, p), y = lerp(c.y, H / 2, p), s = lerp(1, 0.3, p);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(p * (i % 2 ? 1 : -1) * 0.8); ctx.scale(s, s); ctx.globalAlpha = 1 - p;
+    roundRect(-TW / 2, -TH / 2, TW, TH, 16); ctx.fillStyle = '#EDEDED'; ctx.fill(); ctx.restore();
+  }
+  const m = eOutBack(prog(u, 0.6, 1.05), 1.8); ghMark(W / 2, H / 2, 340 * m, C.white);
+  const rp = prog(u, 0.65, 1.4); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(W / 2, H / 2, 220 + rp * 600, 0, 6.283); ctx.stroke(); }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  const cam = camAt(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 16 * shake, (hash(frame + 5) - 0.5) * 16 * shake);
+  if (t < T_OUT) { ctx.save(); if (t >= T_DROP && t < T_R0) ctx.globalAlpha = 0.35; wall(t, cam); ctx.restore(); titleCard(t, W / 2, 'center'); }
+  else closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.2], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>
