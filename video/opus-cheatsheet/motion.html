@@ -1,0 +1,280 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Opus Prompting Cheatsheet</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// A cheatsheet that builds itself: headline morphs into the header, the camera zooms into each tile.
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const C = { orange: '#D97757', deep: '#C15F3C', cream: '#F0EEE6', dim: '#8A877F' };
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+
+const BEAT = 0.5, T_DROP = 2, T_MORPH = 3.0, T_TIP0 = 3.5, TIP_DUR = 1.5, N = 6, T_FULL = 12.5, T_OUT = 13, DUR = 15;
+const TIP_T = i => T_TIP0 + i * TIP_DUR;
+const HITS = []; for (let t = 2; t < 13; t += BEAT) HITS.push(t); HITS.push(13);
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutCubic = p => 1 - Math.pow(1 - p, 3);
+const eInOutCubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eOutBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(55);
+const pad2 = n => String(n).padStart(2, '0');
+function pulseAt(t, d = 8) { let p = 0; for (const k of HITS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * d)); return p; }
+function font(f) { ctx.font = f; }
+function txt(s, x, y, c, al = 'left', base = 'alphabetic') { ctx.fillStyle = c; ctx.textAlign = al; ctx.textBaseline = base; ctx.fillText(s, x, y); }
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+function wrap(s, maxW) { const out = ['']; for (const w of s.split(' ')) { const tr = (out[out.length - 1] + ' ' + w).trim(); if (ctx.measureText(tr).width > maxW && out[out.length - 1]) out.push(w); else out[out.length - 1] = tr; } return out; }
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function maskRise(s, x, y, p, fill, size, al = 'left') {
+  if (p <= 0) return; const w = ctx.measureText(s).width, x0 = al === 'left' ? x : al === 'center' ? x - w / 2 : x - w;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 20, y - size, w + 40, size * 1.32); ctx.clip();
+  ctx.fillStyle = fill; ctx.textAlign = al; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y + (1 - eOutExpo(p)) * size * 1.1); ctx.restore();
+}
+
+// ---------- spark from the brand mark ----------
+const RAY_L = [1, .74, .93, .7, .98, .79, .9, .72, 1, .77, .87, .73];
+const RAY_J = RAY_L.map((_, i) => Math.sin(i * 12.9898) * 0.07);
+function spark(x, y, r, p, rot, color = C.orange, alpha = 1) {
+  if (p <= 0) return;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha *= alpha; ctx.fillStyle = color;
+  for (let i = 0; i < 12; i++) {
+    const pi = clamp((p - i * 0.035) / 0.55); if (pi <= 0) continue;
+    const len = r * RAY_L[i] * eOutBack(pi, 1.4), a = i * Math.PI / 6 + RAY_J[i];
+    const w0 = r * 0.1, w1 = r * 0.065, ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+    ctx.beginPath(); ctx.moveTo(px * w0, py * w0); ctx.lineTo(ca * len + px * w1, sa * len + py * w1);
+    ctx.arc(ca * len, sa * len, w1, a + Math.PI / 2, a - Math.PI / 2, true); ctx.lineTo(-px * w0, -py * w0); ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.2 * clamp(p * 3), 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ---------- content ----------
+const TIPS = [
+  ['Default to medium effort', 'Medium on 5.5 already outperforms high on Opus 5, at a lower cost. Maxing it out by habit just burns tokens.'],
+  ['Drop “think step by step”', 'Reasoning is built in now. The model decides how much thinking a task needs, so asking it to think harder adds nothing.'],
+  ['A check-in isn’t a finish line', 'On long runs, it sends progress updates along the way. If it stops to report, tell it to keep going.'],
+  ['Fence off anything you paste', 'Put emails, docs, and web text in clearly labeled sections or tags. That way it can tell your instructions apart from the material it’s working on.'],
+  ['Retire your image workarounds', 'Those custom chart readers and OCR steps you built are probably dead weight. It reads screenshots, diagrams, and charts accurately on its own.'],
+  ['For design work, name what you don’t want', '“Make it unique” gets you generic. “No purple gradients, no centered hero, no emoji icons” gets you something different. It follows specific bans much better than vague direction.'],
+];
+
+// ---------- sheet geometry (world coords == screen coords at zoom 1) ----------
+const SX = 80, SY = 210, TW = 566, TH = 380, GAP = 31;
+const tileXY = i => ({ x: SX + (i % 3) * (TW + GAP), y: SY + Math.floor(i / 3) * (TH + GAP) });
+const OVER = { x: W / 2, y: H / 2, z: 1 };
+const tileCam = i => { const p = tileXY(i); return { x: p.x + TW / 2, y: p.y + TH / 2, z: 2.55 }; };
+function camAt(t) {
+  const mv = (from, to, p) => ({ x: lerp(from.x, to.x, p), y: lerp(from.y, to.y, p), z: lerp(from.z, to.z, p) * (1 - 0.28 * Math.sin(Math.PI * p)) });
+  if (t < TIP_T(0) - 0.15) return OVER;
+  if (t < T_FULL - 0.15) {
+    const i = clamp(Math.floor((t - (TIP_T(0) - 0.15)) / TIP_DUR), 0, N - 1), t0 = TIP_T(i) - 0.15;
+    return mv(i === 0 ? OVER : tileCam(i - 1), tileCam(i), eInOutCubic(prog(t, t0, t0 + 0.45)));
+  }
+  if (t < T_OUT) return mv(tileCam(N - 1), OVER, eInOutCubic(prog(t, T_FULL - 0.15, T_FULL + 0.35)));
+  const p = eInOutCubic(prog(t, T_OUT, T_OUT + 0.5));
+  return { x: W / 2, y: lerp(540, 590, p), z: lerp(1, 0.86, p) };
+}
+const revealT = i => TIP_T(i) + 0.05;
+
+// ---------- background ----------
+const grains = [];
+for (let i = 0; i < 6; i++) {
+  const g = document.createElement('canvas'); g.width = W / 2; g.height = H / 2;
+  const gx = g.getContext('2d'); const im = gx.createImageData(g.width, g.height);
+  for (let j = 0; j < im.data.length; j += 4) { const v = rnd() * 255; im.data[j] = im.data[j + 1] = im.data[j + 2] = v; im.data[j + 3] = 14; }
+  gx.putImageData(im, 0, 0); grains.push(g);
+}
+function background(t, cam) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 5);
+  const g = ctx.createRadialGradient(W * 0.5, H * 0.45, 0, W * 0.5, H * 0.45, 1100);
+  g.addColorStop(0, rgba(C.orange, 0.09 + pk * 0.04)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // parallax dot grid (moves with the camera, slower)
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(1 + (cam.z - 1) * 0.25, 1 + (cam.z - 1) * 0.25); ctx.translate(-W / 2 - (cam.x - W / 2) * 0.25, -H / 2 - (cam.y - H / 2) * 0.25);
+  ctx.fillStyle = 'rgba(240,238,230,0.07)';
+  for (let x = -400; x < W + 400; x += 44) for (let y = -300; y < H + 300; y += 44) ctx.fillRect(x, y, 2, 2);
+  ctx.restore();
+}
+
+// ---------- tile illustrations (top-right of each tile) ----------
+function illo(i, x, y, p, t) {
+  if (p <= 0) return;
+  ctx.save(); ctx.translate(x, y); ctx.globalAlpha *= clamp(p * 2);
+  ctx.lineCap = 'round';
+  if (i === 0) { // effort dial: needle settles on MED
+    const cx = 100, cy = 70, r = 56;
+    ['LOW', 'MED', 'HIGH'].forEach((l, k) => {
+      const a0 = Math.PI + k * Math.PI / 3 + 0.05, a1 = a0 + Math.PI / 3 - 0.1;
+      ctx.strokeStyle = k === 1 ? C.orange : 'rgba(240,238,230,0.25)'; ctx.lineWidth = 12; ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+    });
+    const a = Math.PI + lerp(0.2, Math.PI / 2, eOutBack(prog(p, 0.2, 1), 2.5));
+    ctx.strokeStyle = C.cream; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * (r - 14), cy + Math.sin(a) * (r - 14)); ctx.stroke();
+    ctx.fillStyle = C.cream; ctx.beginPath(); ctx.arc(cx, cy, 7, 0, 6.283); ctx.fill();
+    font('600 15px JBM'); txt('MEDIUM', cx, cy + 26, C.orange, 'center');
+  } else if (i === 1) { // struck-through phrase chip
+    font('600 17px JBM'); const s = '"think step by step"', w = ctx.measureText(s).width + 28;
+    roundRect(200 - w, 24, w, 42, 21); ctx.fillStyle = 'rgba(240,238,230,0.06)'; ctx.fill(); ctx.strokeStyle = 'rgba(240,238,230,0.3)'; ctx.lineWidth = 1.5; ctx.stroke();
+    txt(s, 200 - w + 14, 51, rgba(C.cream, 0.6));
+    ctx.fillStyle = C.orange; ctx.fillRect(200 - w + 8, 44, (w - 16) * eOutExpo(prog(p, 0.3, 0.8)), 4);
+    font('600 14px JBM'); txt('built in ✓', 200, 92, C.orange, 'right');
+  } else if (i === 2) { // progress track with check-ins, then keep going
+    const y0 = 46, x0 = 10, x1 = 200;
+    ctx.strokeStyle = 'rgba(240,238,230,0.2)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.stroke();
+    const run = (t * 0.6) % 1, px = lerp(x0, x1, eOutCubic(clamp(p)) * 0.4 + run * 0.6 * clamp(p));
+    ctx.strokeStyle = C.orange; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(px, y0); ctx.stroke();
+    [0.33, 0.66].forEach(f => { const fx = lerp(x0, x1, f); ctx.fillStyle = px > fx ? C.orange : '#000'; ctx.strokeStyle = C.orange; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(fx, y0, 9, 0, 6.283); ctx.fill(); ctx.stroke(); });
+    font('600 14px JBM'); txt('check-in', lerp(x0, x1, 0.33), y0 - 18, C.dim, 'center'); txt('keep going ▶', x1, y0 + 34, C.orange, 'right');
+  } else if (i === 3) { // fenced paste
+    font('600 18px JBM'); txt('<email>', 20, 22, C.orange);
+    ctx.fillStyle = 'rgba(240,238,230,0.3)'; [0, 1].forEach(k => ctx.fillRect(36, 34 + k * 14, (120 - k * 30) * eOutCubic(prog(p, 0.2 + k * 0.1, 0.7 + k * 0.1)), 6));
+    txt('</email>', 20, 86, C.orange);
+    ctx.strokeStyle = C.orange; ctx.lineWidth = 2; ctx.setLineDash([5, 5]); roundRect(8, 2, 192, 96, 10); ctx.stroke(); ctx.setLineDash([]);
+  } else if (i === 4) { // chart read by the model: scan + check
+    ctx.strokeStyle = 'rgba(240,238,230,0.35)'; ctx.lineWidth = 2; roundRect(40, 6, 150, 88, 8); ctx.stroke();
+    [34, 56, 44, 70].forEach((h, k) => { ctx.fillStyle = k === 3 ? C.orange : 'rgba(240,238,230,0.4)'; const hh = h * eOutCubic(prog(p, k * 0.1, 0.5 + k * 0.1)); ctx.fillRect(58 + k * 30, 86 - hh, 18, hh); });
+    const sy = 10 + ((t * 1.2) % 1) * 80; ctx.fillStyle = rgba(C.orange, 0.7); ctx.fillRect(42, sy, 146, 2);
+    if (p > 0.8) { ctx.strokeStyle = C.orange; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(0, 50); ctx.lineTo(12, 64); ctx.lineTo(30, 36); ctx.stroke(); }
+  } else { // explicit bans
+    font('600 16px JBM');
+    ['purple gradients', 'centered hero', 'emoji icons'].forEach((s, k) => {
+      const q = prog(p, 0.15 + k * 0.15, 0.5 + k * 0.15); if (q <= 0) return;
+      ctx.save(); ctx.globalAlpha *= q; txt('✕ ' + s, 200, 22 + k * 30 + (1 - eOutExpo(q)) * 10, k === 1 ? C.orange : C.cream, 'right'); ctx.restore();
+    });
+  }
+  ctx.restore();
+}
+
+// ---------- the sheet ----------
+function header(t) {
+  // headline lines morph from centre-stage into the header slot
+  const m = eInOutCubic(prog(t, T_MORPH, T_MORPH + 0.45));
+  const l1 = 'OPUS 5.5', l2 = 'PROMPTING CHEATSHEET';
+  const s1 = lerp(280, 54, m), s2 = lerp(96, 54, m);
+  font(`${s1}px IDBlack`); const w1 = ctx.measureText(l1).width;
+  font(`${s2}px IDBlack`); const w2 = ctx.measureText(l2).width;
+  const hx = 200, hy = 152;
+  const p1 = prog(t, T_DROP, T_DROP + 0.25), p2 = prog(t, T_DROP + 0.35, T_DROP + 0.6);
+  // line 1
+  if (p1 > 0) {
+    const x = lerp(W / 2 - w1 / 2, hx, m), y = lerp(570, hy, m);
+    font(`${s1}px IDBlack`); ctx.save(); ctx.translate(x + w1 / 2, y);
+    const sc = lerp(1.6, 1, eOutExpo(p1)); ctx.scale(sc, sc); ctx.globalAlpha = clamp(p1 * 3);
+    txt(l1, 0, 0, C.orange, 'center'); ctx.restore();
+    font(`${s2}px IDBlack`);
+    const x2 = lerp(W / 2 - w2 / 2, hx + w1 + 18 * m + 18, m), y2 = lerp(700, hy, m);
+    maskRise(l2, x2, y2, p2, C.cream, s2);
+  }
+  // header furniture once morphed
+  if (m > 0) {
+    ctx.save(); ctx.globalAlpha = m;
+    spark(130, 134, 40, m, t * 0.6, C.orange);
+    font('500 24px IDMed'); txt('via Anthropic’s prompting guide', W - 80, 128, C.dim, 'right');
+    font('600 18px JBM'); txt('6 TIPS · SAVE THIS', W - 80, 158, C.orange, 'right');
+    ctx.fillStyle = rgba(C.orange, 0.5); ctx.fillRect(SX, 186, (W - 2 * SX) * eOutExpo(prog(t, T_MORPH + 0.1, T_MORPH + 0.6)), 2);
+    ctx.restore();
+  }
+}
+function tile(t, i) {
+  const { x, y } = tileXY(i), pop = eOutBack(prog(t, T_MORPH + 0.1 + i * 0.05, T_MORPH + 0.45 + i * 0.05), 1.8);
+  if (pop <= 0) return;
+  const rt = revealT(i), filled = t >= rt, active = t >= TIP_T(i) - 0.15 && t < TIP_T(i) + TIP_DUR - 0.15 && t < T_FULL - 0.15;
+  ctx.save(); ctx.translate(x + TW / 2, y + TH / 2); ctx.scale(pop, pop); ctx.translate(-TW / 2, -TH / 2);
+  roundRect(0, 0, TW, TH, 22);
+  if (!filled) {
+    ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(240,238,230,0.22)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+    font('200px IDBlack'); txt(pad2(i + 1), TW / 2, TH / 2 + 72, 'rgba(240,238,230,0.05)', 'center');
+    ctx.restore(); return;
+  }
+  const u = t - rt;
+  ctx.fillStyle = active ? 'rgba(217,119,87,0.08)' : 'rgba(240,238,230,0.035)'; ctx.fill();
+  ctx.strokeStyle = rgba(C.orange, active ? 0.85 : 0.35); ctx.lineWidth = active ? 2.5 : 1.5; ctx.stroke();
+  // top accent line sweeps in
+  ctx.fillStyle = C.orange; ctx.fillRect(22, 0, (TW - 44) * eOutExpo(prog(u, 0, 0.4)), 3);
+  // badge
+  const bp = eOutBack(prog(u, 0, 0.25), 2.4);
+  ctx.save(); ctx.translate(56, 58); ctx.scale(bp, bp); ctx.fillStyle = C.orange; ctx.beginPath(); ctx.arc(0, 0, 28, 0, 6.283); ctx.fill();
+  font('600 24px JBM'); txt(pad2(i + 1), 0, 9, '#000', 'center'); ctx.restore();
+  illo(i, TW - 230, 18, prog(u, 0.08, 0.7), t);
+  // title + body
+  font('38px IDBlack'); const tl = wrap(TIPS[i][0], TW - 64).slice(0, 2);
+  tl.forEach((l, k) => maskRise(l, 32, 160 + k * 44, prog(u, 0.04 + k * 0.04, 0.28 + k * 0.04), C.cream, 38));
+  const by = 160 + tl.length * 44 + 18;
+  font('22px IDMed'); const bl = wrap(TIPS[i][1], TW - 64);
+  bl.forEach((l, k) => maskRise(l, 32, by + k * 31, prog(u, 0.12 + k * 0.04, 0.34 + k * 0.04), rgba(C.cream, 0.75), 22));
+  ctx.restore();
+}
+function sheet(t) {
+  header(t);
+  for (let i = 0; i < N; i++) tile(t, i);
+}
+
+// ---------- intro / overlays ----------
+function intro(t) {
+  spark(W / 2, 330, 90, prog(t, 0.05, 0.7), t * 0.7, C.orange);
+  font('600 30px JBM');
+  const s = 'Anthropic just published its official prompting guide for…';
+  const p = prog(t, 0.25, 1.45);
+  if (p > 0) {
+    const shown = typed(s, p); txt(shown, W / 2, 540, C.cream, 'center');
+    if (Math.floor(t * 6) % 2 === 0) { const w = ctx.measureText(shown).width, fw = ctx.measureText(s).width; ctx.fillStyle = C.orange; ctx.fillRect(W / 2 - fw / 2 + w + 6, 514, 14, 32); }
+  }
+}
+function outroOverlay(t) {
+  if (t < T_OUT) return;
+  const u = t - T_OUT;
+  const bp = eOutExpo(prog(u, 0.3, 0.6));
+  const w = 1100 * bp;
+  roundRect(W / 2 - w / 2, 940, w, 72, 36); ctx.fillStyle = C.orange; ctx.fill();
+  if (bp > 0.6) {
+    font('34px IDBlack'); txt('SAVE THIS CHEATSHEET', W / 2 - 120, 988, '#000', 'center');
+    spark(W / 2 + 120, 976, 18, prog(u, 0.5, 0.9), t, '#000');
+    font('600 24px JBM'); txt(typed('follow x.com/nrqa__', prog(u, 0.6, 1.0)), W / 2 + 160, 985, '#000', 'left');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  const cam = camAt(t);
+  background(t, cam);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save();
+  ctx.translate(W / 2 + (hash(frame) - 0.5) * 22 * shake, H / 2 + (hash(frame + 5) - 0.5) * 22 * shake);
+  ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  if (t < T_DROP) { ctx.restore(); intro(t); }
+  else { sheet(t); ctx.restore(); }
+  outroOverlay(t);
+  for (const [h, c] of [[T_DROP, '217,119,87'], [T_FULL, '240,238,230'], [T_OUT, '217,119,87']]) { const p = prog(t, h, h + 0.25); if (p > 0 && p < 1) { ctx.fillStyle = `rgba(${c},${0.45 * (1 - eOutCubic(p))})`; ctx.fillRect(0, 0, W, H); } }
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.4, W / 2, H / 2, H); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.6)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  ctx.fillStyle = C.orange; ctx.fillRect(0, H - 5, W * clamp(t / DUR), 5);
+  const s = 'x.com/nrqa__';
+  font('500 24px IDMed'); txt(s, 56, 62, 'rgba(240,238,230,0.45)', 'left', 'middle'); txt(s, W - 56, H - 30, 'rgba(240,238,230,0.45)', 'right', 'middle');
+  font('500 30px IDMed'); txt(s, W / 2, H / 2, 'rgba(240,238,230,0.16)', 'center', 'middle');
+  const fo = prog(t, DUR - 0.3, DUR); if (fo > 0) { ctx.fillStyle = `rgba(0,0,0,${fo})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = Promise.all(['10px IDBlack', '10px IDBold', '10px IDMed', 'italic 10px NR', '600 10px JBM', '400 10px JBM'].map(f => document.fonts.load(f))).then(() => render(0, 0));
+</script>
+</body>
+</html>
