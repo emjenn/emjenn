@@ -1,0 +1,272 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Claude Token Tips</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+const W = 1920, H = 1080;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+// ---------- palette (from the attached brand mark) ----------
+const C = { orange: '#D97757', deep: '#C15F3C', cream: '#F0EEE6', dim: '#8A877F' };
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+
+// ---------- timing (120 BPM: one tip per beat) ----------
+const BEAT = 0.5, T_DROP = 2, T_TIPS = 3.5, N = 17, T_WALL = 12, T_OUT = 13, DUR = 15;
+const HITS = [2, 2.5, 3]; for (let i = 0; i < N; i++) HITS.push(T_TIPS + i * BEAT); HITS.push(12, 12.5, 13);
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eInExpo = p => p <= 0 ? 0 : Math.pow(2, 10 * p - 10);
+const eOutCubic = p => 1 - Math.pow(1 - p, 3);
+const eInOutCubic = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eOutBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+const hash = n => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(17);
+const pad2 = n => String(n).padStart(2, '0');
+function pulseAt(t, d = 8) { let p = 0; for (const k of HITS) if (t >= k) p = Math.max(p, Math.exp(-(t - k) * d)); return p; }
+function font(f) { ctx.font = f; }
+function txt(s, x, y, c, al = 'left', base = 'alphabetic') { ctx.fillStyle = c; ctx.textAlign = al; ctx.textBaseline = base; ctx.fillText(s, x, y); }
+function typed(s, p) { return s.slice(0, Math.round(s.length * clamp(p))); }
+function fit(s, fam, size, maxW, min = 16) { font(`${size}px ${fam}`); while (ctx.measureText(s).width > maxW && size > min) { size -= 2; font(`${size}px ${fam}`); } return size; }
+function wrap(s, maxW) { const out = ['']; for (const w of s.split(' ')) { const tr = (out[out.length - 1] + ' ' + w).trim(); if (ctx.measureText(tr).width > maxW && out[out.length - 1]) out.push(w); else out[out.length - 1] = tr; } return out; }
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function maskRise(s, x, y, p, fill, size, al = 'left') {
+  if (p <= 0) return; const w = ctx.measureText(s).width, x0 = al === 'left' ? x : al === 'center' ? x - w / 2 : x - w;
+  ctx.save(); ctx.beginPath(); ctx.rect(x0 - 30, y - size, w + 60, size * 1.3); ctx.clip();
+  ctx.fillStyle = fill; ctx.textAlign = al; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y + (1 - eOutExpo(p)) * size * 1.1); ctx.restore();
+}
+
+// ---------- the spark (chunky rays, like the attached mark) ----------
+const RAY_L = [1, .74, .93, .7, .98, .79, .9, .72, 1, .77, .87, .73];
+const RAY_J = RAY_L.map((_, i) => Math.sin(i * 12.9898) * 0.07);
+function spark(x, y, r, p, rot, color = C.cream, alpha = 1) {
+  if (p <= 0) return;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.globalAlpha *= alpha; ctx.fillStyle = color;
+  for (let i = 0; i < 12; i++) {
+    const pi = clamp((p - i * 0.035) / 0.55);
+    if (pi <= 0) continue;
+    const len = r * RAY_L[i] * eOutBack(pi, 1.4), a = i * Math.PI / 6 + RAY_J[i];
+    const w0 = r * 0.1, w1 = r * 0.065, ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+    ctx.beginPath(); ctx.moveTo(px * w0, py * w0); ctx.lineTo(ca * len + px * w1, sa * len + py * w1);
+    ctx.arc(ca * len, sa * len, w1, a + Math.PI / 2, a - Math.PI / 2, true); ctx.lineTo(-px * w0, -py * w0); ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.2 * clamp(p * 3), 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ---------- the 17 tips (condensed for screen; meaning kept) ----------
+const TIPS = [
+  ['Uploading raw PDFs (1 page ≈ 3,000 tokens)', 'Paste into a Google Doc, download as .md', 'under 200 tokens', 'PDF → .md'],
+  ['Building files in Cowork too early', 'Plan in Chat first, then move to Cowork', 'only when you know exactly what you want', 'Plan in Chat first'],
+  ['500-word prompts that reload', 'Write 29 words instead', '“I want to [task] to [goal]. Ask me questions using AskUserQuestion.”', '29-word prompts'],
+  ['“Redo the whole thing” to fix part 3', 'Only redo section 3', '“Keep everything else. No commentary. Just the output.”', 'Redo only the part'],
+  ['3 separate messages for 3 tasks', 'One message, three tasks', '“Summarize this, list the points, suggest a headline.”', 'Batch your tasks'],
+  ['Typing “No, I meant…” on top of history', 'Click Edit, fix it, regenerate', 'history replaced, not added', 'Edit, don’t stack'],
+  ['Using Opus for a grammar check', 'Sonnet or Haiku for quick tasks', 'save Opus + Extended Thinking for deep work', 'Right-size the model'],
+  ['Dumping 50 files into Cowork “just in case”', 'Only include what this task needs', 'zero folders for quick tasks like email drafts', 'Only needed files'],
+  ['Never restarting, endless long chats', 'Every 15–20 messages: summarize, start fresh', 'copy the brief into a new session', 'Fresh session often'],
+  ['3 topics in 1 chat (Claude re-reads all)', 'New topic = new chat. Always.', 'dead context is dead tokens', 'New topic, new chat'],
+  ['A 22,000-word about-me file', 'Trim it to under 2,000 words', 'ruben.substack.com/p/how-to-stop-hitting-claude-usage', 'Trim the about-me'],
+  ['Search & connectors on by default', 'Default everything off', 'turn features on per task, not per account', 'Features off by default'],
+  ['Uploading the same PDF to 5 chats', 'Use Projects. Upload once.', 'every chat inside references it', 'Use Projects'],
+  ['Skipping Personal Preferences', 'Set your tone and style once', 'Settings → Personal Preferences. It persists.', 'Set preferences once'],
+  ['Rewriting prompts from scratch', 'Keep a prompt library', 'same structure, swap the variable. Stable prompts get cached.', 'Prompt library'],
+  ['Running the same report by hand weekly', 'Use /schedule', '“Every Monday at 7am, create my weekly briefing.”', '/schedule it'],
+  ['Using Claude for things it can’t do', 'Know your tools', 'Images → Gemini · Real-time search → Grok', 'Right tool, right job'],
+];
+
+// ---------- background ----------
+const grains = [];
+for (let i = 0; i < 6; i++) {
+  const g = document.createElement('canvas'); g.width = W / 2; g.height = H / 2;
+  const gx = g.getContext('2d'); const im = gx.createImageData(g.width, g.height);
+  for (let j = 0; j < im.data.length; j += 4) { const v = rnd() * 255; im.data[j] = im.data[j + 1] = im.data[j + 2] = v; im.data[j + 3] = 14; }
+  gx.putImageData(im, 0, 0); grains.push(g);
+}
+const EMBERS = Array.from({ length: 70 }, () => ({ x: rnd() * W, y: rnd() * H, z: 0.3 + rnd() * 0.7, ph: rnd() * 6.28 }));
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const pk = pulseAt(t, 5), on = t < T_DROP ? 0.5 : 1;
+  const g = ctx.createRadialGradient(W * 0.22, H * 0.55, 0, W * 0.22, H * 0.55, 1000);
+  g.addColorStop(0, rgba(C.orange, (0.12 + pk * 0.06) * on)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // embers drift upward (tokens burning)
+  for (const e of EMBERS) {
+    const y = ((e.y - t * 60 * e.z) % H + H) % H, x = e.x + Math.sin(t + e.ph) * 20;
+    ctx.fillStyle = rgba(e.z > 0.7 ? C.orange : C.cream, 0.35 * e.z * (0.5 + 0.5 * Math.sin(t * 3 + e.ph)));
+    ctx.beginPath(); ctx.arc(x, y, 1.8 * e.z * (1 + pk), 0, 6.283); ctx.fill();
+  }
+}
+function watermark() {
+  const s = 'x.com/nrqa__';
+  font('500 24px IDMed');
+  txt(s, 56, 62, 'rgba(240,238,230,0.45)', 'left', 'middle');
+  txt(s, W - 56, H - 50, 'rgba(240,238,230,0.45)', 'right', 'middle');
+  font('500 30px IDMed');
+  txt(s, W / 2, H / 2, 'rgba(240,238,230,0.16)', 'center', 'middle');
+}
+
+// ---------- intro: the tank drains ----------
+function intro(t) {
+  const d = eInExpo(prog(t, 0.2, 1.5));
+  const left = Math.round(200000 * (1 - d));
+  spark(W / 2, 300, 70, prog(t, 0.05, 0.6), t * 0.8, C.orange);
+  font('600 26px JBM'); txt('CONTEXT REMAINING', W / 2, 470, C.dim, 'center');
+  font('150px IDBlack'); txt(left.toLocaleString('en-US'), W / 2, 640, left < 30000 ? C.orange : C.cream, 'center');
+  font('600 26px JBM'); txt('tokens', W / 2, 690, C.dim, 'center');
+  const bw = 900;
+  ctx.strokeStyle = rgba(C.cream, 0.3); ctx.lineWidth = 2; roundRect(W / 2 - bw / 2, 740, bw, 30, 15); ctx.stroke();
+  ctx.fillStyle = C.orange; roundRect(W / 2 - bw / 2 + 4, 744, Math.max(0, (bw - 8) * (1 - d)), 22, 11); ctx.fill();
+  const wp = prog(t, 1.45, 1.75);
+  if (wp > 0 && Math.floor(t * 10) % 2 === 0) { font('600 34px JBM'); txt(typed('⚠ usage limit reached', wp), W / 2, 860, C.orange, 'center'); }
+}
+
+// ---------- headline ----------
+function headline(t) {
+  const u = t - T_DROP, out = eInExpo(prog(t, T_TIPS - 0.25, T_TIPS));
+  ctx.save(); ctx.globalAlpha = 1 - out;
+  spark(W / 2, 520, 420 * (1 + out * 2), prog(u, 0, 0.5), t * 0.4, C.orange, 0.16);
+  font('120px IDBlack');
+  const p1 = prog(u, 0.0, 0.25);
+  if (p1 > 0) { ctx.save(); ctx.translate(W / 2, 400); const s = lerp(1.5, 1, eOutExpo(p1)); ctx.scale(s, s); ctx.globalAlpha *= clamp(p1 * 3); txt('YOUR CLAUDE TOKENS', 0, 0, C.cream, 'center'); ctx.restore(); }
+  font('260px IDBlack');
+  const p2 = prog(u, 0.5, 0.72);
+  if (p2 > 0) { ctx.save(); ctx.translate(W / 2, 640); const s = lerp(2, 1, eOutExpo(p2)); ctx.scale(s, s); ctx.rotate((1 - eOutExpo(p2)) * -0.1); ctx.globalAlpha *= clamp(p2 * 3); txt('GO FAST.', 0, 0, C.orange, 'center'); ctx.restore(); }
+  font('italic 72px NR'); maskRise('these 17 tips could help', W / 2, 770, prog(u, 0.95, 1.25), C.cream, 72, 'center');
+  ctx.restore();
+}
+
+// ---------- tips ----------
+function tipPos(t) {
+  if (t < T_TIPS) return -1 + eOutExpo(prog(t, T_TIPS - 0.25, T_TIPS));
+  const k = (t - T_TIPS) / BEAT, i = Math.floor(k), f = k - i;
+  if (i >= N - 1) return N - 1;
+  return i + eInOutCubic(clamp((f - 0.76) / 0.24));
+}
+function gauge(t, s, enter) {
+  const cx = 400, cy = 540, R = 250, seg = Math.PI * 2 / N, gap = 0.07;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineWidth = 22;
+  for (let i = 0; i < N; i++) {
+    const pi = eOutCubic(clamp((enter - i * 0.025) / 0.5)); if (pi <= 0) continue;
+    const a0 = -Math.PI / 2 + i * seg + gap / 2, lit = clamp(s + 1 - i);
+    ctx.strokeStyle = lit > 0 ? C.orange : rgba(C.cream, 0.14); ctx.globalAlpha = lit > 0 ? 0.4 + 0.6 * lit : 1;
+    ctx.beginPath(); ctx.arc(cx, cy, R, a0, a0 + (seg - gap) * pi); ctx.stroke();
+  }
+  ctx.restore();
+  const bump = pulseAt(t, 10);
+  spark(cx, cy, 120 * (1 + bump * 0.12) * enter, enter, t * 0.5 + s * 0.3, C.cream);
+  const act = clamp(Math.round(s), 0, N - 1);
+  font('600 26px JBM'); txt('TIP', cx, cy + R + 80, C.dim, 'center');
+  font('84px IDBlack'); txt(`${pad2(act + 1)}`, cx - 10, cy + R + 160, C.orange, 'right');
+  font('600 36px JBM'); txt(`/ ${N}`, cx + 6, cy + R + 156, C.dim, 'left');
+  font('600 22px JBM'); txt('TOKEN LEAKS FIXED', cx, cy - R - 50, rgba(C.cream, 0.7 * enter), 'center');
+}
+function tipCard(t, j, y, sc, alpha, active) {
+  const [bad, fix, detail] = TIPS[j];
+  const x = 770, w = 1090, h = 340;
+  ctx.save(); ctx.translate(x + w / 2, y); ctx.scale(sc, sc); ctx.globalAlpha *= alpha; ctx.translate(-w / 2, -h / 2);
+  roundRect(0, 0, w, h, 26); ctx.fillStyle = active ? 'rgba(217,119,87,0.09)' : 'rgba(240,238,230,0.03)'; ctx.fill();
+  ctx.strokeStyle = rgba(C.orange, active ? 0.7 : 0.25); ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = C.orange; roundRect(0, 30, 8, h - 60, 4); ctx.fill();
+  const u = active ? t - (T_TIPS + j * BEAT) : 1;
+  // mistake, struck through
+  font('600 22px JBM'); txt(`TIP ${pad2(j + 1)}  ·  STOP`, 50, 56, C.dim);
+  const bs = fit('✕  ' + bad, 'IDBold', 44, w - 100, 24);
+  txt('✕  ' + bad, 50, 112, rgba(C.cream, 0.6));
+  const bw = ctx.measureText('✕  ' + bad).width, st = eOutExpo(prog(u, 0.04, 0.2));
+  ctx.fillStyle = C.orange; ctx.fillRect(50, 112 - bs * 0.32, bw * st, 5);
+  // fix
+  font('600 22px JBM'); txt('DO THIS', 50, 172, C.orange);
+  const fs = fit('→ ' + fix, 'IDBlack', 74, w - 100, 34);
+  maskRise('→ ' + fix, 50, 172 + fs + 4, active ? prog(u, 0.06, 0.24) : 1, C.orange, fs);
+  font('400 25px JBM');
+  const dl = wrap(detail, w - 100);
+  dl.slice(0, 2).forEach((l, k) => txt(typed(l, active ? prog(u, 0.1, 0.36) : 1), 50, 172 + fs + 50 + k * 31, rgba(C.cream, 0.75)));
+  ctx.restore();
+}
+function tips(t) {
+  const s = tipPos(t), enter = eOutExpo(prog(t, T_TIPS - 0.3, T_TIPS + 0.2)), exit = eInExpo(prog(t, T_WALL - 0.25, T_WALL));
+  ctx.save(); ctx.globalAlpha = 1 - exit;
+  gauge(t, s, enter);
+  ctx.fillStyle = rgba(C.orange, 0.5 * enter); ctx.fillRect(720, 240, 2, 600);
+  const act = clamp(Math.round(s), 0, N - 1);
+  for (let j = Math.max(0, act - 2); j <= Math.min(N - 1, act + 2); j++) {
+    const d = j - s; if (Math.abs(d) > 1.8) continue;
+    tipCard(t, j, 540 + d * 380, 1 - Math.abs(d) * 0.14, enter * clamp(1 - Math.abs(d) * 0.72), Math.abs(d) < 0.5 && t >= T_TIPS);
+  }
+  ctx.restore();
+}
+
+// ---------- wall ----------
+function wall(t) {
+  const u = t - T_WALL;
+  font('96px IDBlack'); maskRise('17 FIXES.', 120, 230, prog(u, 0, 0.25), C.orange, 96);
+  font('italic 80px NR'); maskRise('one bookmark.', 640, 230, prog(u, 0.12, 0.35), C.cream, 80);
+  const cols = 6, tw = 268, th = 200, gx = 20, gy = 20, x0 = W / 2 - (cols * tw + (cols - 1) * gx) / 2, y0 = 300;
+  for (let i = 0; i < N; i++) {
+    const r = Math.floor(i / cols), c = i % cols, p = prog(u, 0.08 + i * 0.03, 0.35 + i * 0.03);
+    if (p <= 0) continue;
+    const x = x0 + c * (tw + gx) + (r === 2 ? (tw + gx) / 2 : 0), y = y0 + r * (th + gy);
+    ctx.save(); ctx.translate(x + tw / 2, y + th / 2); const sc = eOutBack(p, 2); ctx.scale(sc, sc); ctx.rotate((1 - eOutExpo(p)) * (i % 2 ? 0.3 : -0.3));
+    roundRect(-tw / 2, -th / 2, tw, th, 18); ctx.fillStyle = i % 3 === 0 ? C.orange : 'rgba(240,238,230,0.05)'; ctx.fill();
+    ctx.strokeStyle = rgba(C.orange, 0.6); ctx.lineWidth = 2; ctx.stroke();
+    const fg = i % 3 === 0 ? '#000' : C.cream;
+    font('600 44px JBM'); txt(pad2(i + 1), -tw / 2 + 22, -th / 2 + 60, i % 3 === 0 ? '#000' : C.orange);
+    font('30px IDBold'); wrap(TIPS[i][3], tw - 44).slice(0, 2).forEach((l, k) => txt(l, -tw / 2 + 22, 30 + k * 36, fg));
+    ctx.restore();
+  }
+}
+
+// ---------- outro ----------
+function outro(t) {
+  const u = t - T_OUT;
+  spark(W / 2, 300, 150 * (1 + pulseAt(t, 6) * 0.1), prog(u, 0, 0.6), t * 0.6, C.orange);
+  font('150px IDBlack');
+  const p = prog(u, 0.2, 0.45);
+  if (p > 0) { ctx.save(); ctx.translate(W / 2, 640); const s = lerp(1.4, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('STOP BURNING TOKENS.', 0, 0, C.cream, 'center'); ctx.restore(); }
+  font('italic 64px NR'); maskRise('save this. fix one leak today.', W / 2, 750, prog(u, 0.5, 0.8), C.orange, 64, 'center');
+  font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.85, 1.25)), W / 2, 840, C.cream, 'center');
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 7));
+  if (t > 1.6 && t < 2) shake = Math.max(shake, 0.4);
+  const pk = pulseAt(t, 12);
+  ctx.save(); ctx.translate(W / 2 + (hash(frame) - 0.5) * 26 * shake, H / 2 + (hash(frame + 3) - 0.5) * 26 * shake); ctx.scale(1 + pk * 0.01, 1 + pk * 0.01); ctx.translate(-W / 2, -H / 2);
+  if (t < T_DROP) intro(t);
+  else if (t < T_TIPS) headline(t);
+  else if (t < T_WALL) tips(t);
+  else if (t < T_OUT) wall(t);
+  else outro(t);
+  ctx.restore();
+  for (const [h, c] of [[T_DROP, '217,119,87'], [T_WALL, '240,238,230'], [T_OUT, '217,119,87']]) { const p = prog(t, h, h + 0.25); if (p > 0 && p < 1) { ctx.fillStyle = `rgba(${c},${0.6 * (1 - eOutCubic(p))})`; ctx.fillRect(0, 0, W, H); } }
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.7)'); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(grains[frame % grains.length], 0, 0, W, H);
+  ctx.fillStyle = C.orange; ctx.fillRect(0, H - 5, W * clamp(t / DUR), 5);
+  watermark();
+  const fo = prog(t, DUR - 0.3, DUR); if (fo > 0) { ctx.fillStyle = `rgba(0,0,0,${fo})`; ctx.fillRect(0, 0, W, H); }
+}
+
+window.ready = Promise.all(['10px IDBlack', '10px IDBold', '10px IDMed', 'italic 10px NR', '600 10px JBM', '400 10px JBM'].map(f => document.fonts.load(f))).then(() => render(0, 0));
+</script>
+</body>
+</html>

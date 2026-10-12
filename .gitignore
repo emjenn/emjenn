@@ -5,3 +5,4 @@ video/ai-guides/build/
 video/ai-guides-b/build/
 video/ai-guides-c/build/
 video/ai-resources/*/build/
+video/claude-tokens/build/
