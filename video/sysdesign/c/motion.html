@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>System Design C</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>window.PALETTE = { acc: '#A78BFA' };</script>
+<script src="../common/lib.js"></script>
+<script>
+// Option C: "Trace" - a distributed-tracing waterfall; each repo is a span in one request.
+const VIO = C.acc, LAV = '#DDD6FE';
+const PX = 80, PY = 110, PW = W - 160, PH = 870;
+const LX = PX + 40, TX0 = PX + 760, TX1 = PX + PW - 40, ROW0 = PY + 150, RH = 58;
+const DEPTH = [0, 1, 1, 2, 2, 1, 2, 2, 1, 2];
+const START = [0.0, 0.04, 0.16, 0.2, 0.3, 0.42, 0.47, 0.6, 0.7, 0.76], DURN = [1.0, 0.3, 0.5, 0.22, 0.34, 0.5, 0.2, 0.3, 0.28, 0.22];
+const barP = (t, i) => t >= T_RECAP ? 1 : eOutCubic(prog(t, SLOT_T(i) + 0.02, SLOT_T(i) + 0.3));
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 1100);
+  g.addColorStop(0, rgba(VIO, 0.07 + pulseAt(t, 6) * 0.03)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function dashboard(t, a) {
+  const open = eOutExpo(prog(t, 0.05, 0.5));
+  ctx.save(); ctx.globalAlpha = a * clamp(open * 2);
+  roundRect(PX, PY, PW, PH * open, 20); ctx.fillStyle = '#0A0910'; ctx.fill(); ctx.strokeStyle = '#2A2540'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.save(); roundRect(PX, PY, PW, PH * open, 20); ctx.clip();
+  // header
+  font('600 22px JBM'); txt('TRACE', LX, PY + 50, VIO);
+  txt(typed('GET /learn/system-design', prog(t, 0.4, 1.0)), LX + 110, PY + 50, C.white);
+  const done = REPOS.filter((_, i) => barP(t, i) >= 1).length;
+  txt(`${done} / 10 spans`, PX + PW - 40, PY + 50, done === 10 ? VIO : C.g2, 'right');
+  ctx.fillStyle = '#1E1B2E'; ctx.fillRect(PX, PY + 76, PW, 2);
+  // axis
+  font('600 16px JBM'); txt('SPAN', LX, PY + 118, C.g2); txt('SERVICE / REPO', LX + 120, PY + 118, C.g2);
+  for (let k = 0; k <= 10; k++) {
+    const x = lerp(TX0, TX1, k / 10), p = prog(t, 0.6 + k * 0.05, 0.8 + k * 0.05);
+    ctx.fillStyle = `rgba(167,139,250,${0.15 * p})`; ctx.fillRect(x, PY + 130, 1, 10 * RH + 20);
+    if (p > 0) txt(`t${k}`, x, PY + 118, C.g3, 'center');
+  }
+  // rows
+  const si = t >= T_R0 && t < T_RECAP ? clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1) : -1;
+  REPOS.forEach((r, i) => {
+    const y = ROW0 + i * RH, bp = barP(t, i), act = i === si;
+    if (act) { ctx.fillStyle = rgba(VIO, 0.12); ctx.fillRect(PX + 4, y - 4, PW - 8, RH - 6); ctx.fillStyle = VIO; ctx.fillRect(PX + 4, y - 4, 4, RH - 6); }
+    font('600 18px JBM'); txt(pad2(i + 1), LX, y + 30, act ? VIO : C.g2);
+    const ix = LX + 70 + DEPTH[i] * 30;
+    if (DEPTH[i] > 0) { ctx.strokeStyle = '#3B3456'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(ix - 18, y + 4); ctx.lineTo(ix - 18, y + 24); ctx.lineTo(ix - 4, y + 24); ctx.stroke(); }
+    if (bp > 0) { fit(r.name, 'IDBold', 26, TX0 - ix - 30, 14); txt(r.name, ix + 6, y + 32, act ? C.white : LAV); }
+    else { ctx.fillStyle = '#1A1726'; ctx.fillRect(ix + 6, y + 14, 200 + hash(i) * 200, 22); }
+    // bar
+    const bx = lerp(TX0, TX1, START[i]), bw = (TX1 - TX0) * DURN[i] * bp;
+    if (bw > 0) {
+      roundRect(bx, y + 10, Math.max(bw, 6), RH - 26, 6); ctx.fillStyle = act ? VIO : rgba(VIO, 0.55); ctx.fill();
+      if (act) { ctx.save(); ctx.shadowColor = VIO; ctx.shadowBlur = 24; roundRect(bx, y + 10, Math.max(bw, 6), RH - 26, 6); ctx.fill(); ctx.restore(); }
+      font('600 14px JBM'); if (bp >= 1 && bw > 120) txt(r.owner, bx + 10, y + 32, act ? '#0A0910' : '#0A0910');
+    }
+  });
+  // playhead
+  if (si >= 0) { const u = t - SLOT_T(si), x = lerp(TX0, TX1, START[si] + DURN[si] * barP(t, si)); ctx.fillStyle = C.white; ctx.fillRect(x, ROW0 - 20, 2, 10 * RH + 10); void u; }
+  // detail strip
+  const dy = PY + PH - 120;
+  ctx.fillStyle = '#100E1A'; ctx.fillRect(PX, dy, PW, 120); ctx.fillStyle = '#2A2540'; ctx.fillRect(PX, dy, PW, 2);
+  if (si >= 0) {
+    const r = REPOS[si], u = t - SLOT_T(si);
+    font('600 18px JBM'); txt(`SPAN ${pad2(si + 1)} / 10 · SELECTED`, LX, dy + 40, VIO);
+    const ns = fit(r.name, 'IDBlack', 50, 1000, 26); maskRise(r.name, LX, dy + 96, prog(u, 0.03, 0.2), C.white, ns);
+    font('400 22px JBM'); txt(typed(url(r), prog(u, 0.08, 0.35)), PX + PW - 40, dy + 90, LAV, 'right');
+  } else if (t >= T_RECAP) {
+    font('600 18px JBM'); txt('TRACE COMPLETE · STATUS 200', LX, dy + 40, VIO);
+    font('50px IDBlack'); maskRise('System design, end to end.', LX, dy + 96, prog(t, T_RECAP + 0.2, T_RECAP + 0.45), C.white, 50);
+  }
+  ctx.restore(); ctx.restore();
+}
+function overlays(t) {
+  if (t < T_DROP) {
+    // incoming request pulse
+    const p = prog(t, 0.9, 1.9);
+    if (p > 0) { ctx.fillStyle = VIO; ctx.beginPath(); ctx.arc(lerp(-40, TX0, eInOutCubic(p)), ROW0 + 28, 12, 0, 6.283); ctx.fill(); }
+  } else if (t < T_R0) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'; ctx.fillRect(0, 300, W * eOutExpo(prog(u, 0, 0.25)), 500);
+    font('64px IDBlack'); maskRise('10 GITHUB REPOS', W / 2, 410, prog(u, 0.05, 0.25), VIO, 64, 'center');
+    font('104px IDBlack'); maskRise('EVERY DEVELOPER SHOULD KNOW', W / 2, 560, prog(u, 0.15, 0.35), C.white, 104, 'center');
+    maskRise('FOR SYSTEM DESIGN', W / 2, 690, prog(u, 0.25, 0.45), C.white, 104, 'center');
+    ctx.restore();
+  } else if (t >= T_OUT) {
+    const u = t - T_OUT;
+    ctx.fillStyle = `rgba(0,0,0,${0.88 * eOutCubic(prog(u, 0, 0.35))})`; ctx.fillRect(0, 0, W, H);
+    font('150px IDBlack'); const p = prog(u, 0.2, 0.45);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 500); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('FOLLOW THE REQUEST.', 0, 0, C.white, 'center'); ctx.restore(); }
+    font('150px IDBlack'); maskRise('MASTER THE SYSTEM.', W / 2, 660, prog(u, 0.35, 0.6), VIO, 150, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.75, 1.15)), W / 2, 780, C.white, 'center');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  dashboard(t, t >= T_DROP && t < T_R0 ? 0.45 : 1);
+  overlays(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '167,139,250', 0.4], [T_RECAP, '167,139,250', 0.3], [T_OUT, '167,139,250', 0.4]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

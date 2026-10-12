@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>System Design B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>window.PALETTE = { acc: '#22C55E' };</script>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Server Rack" - a 10U rack; each unit powers on as one repo.
+const GRN = C.acc;
+const RX = 120, RW = 860, RY = 130, UH = 74, UG = 6;
+const unitY = i => RY + 40 + i * (UH + UG);
+const onAt = (t, i) => t >= T_RECAP ? 1 : prog(t, SLOT_T(i) + 0.02, SLOT_T(i) + 0.25);
+
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(560, 540, 0, 560, 540, 1000);
+  g.addColorStop(0, rgba(GRN, 0.06 + pulseAt(t, 6) * 0.03)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function rackFrame(t, a) {
+  ctx.save(); ctx.globalAlpha = a;
+  const h = 10 * (UH + UG) + 70;
+  ctx.fillStyle = '#0B0B0B'; roundRect(RX - 40, RY, RW + 80, h, 16); ctx.fill(); ctx.strokeStyle = '#262626'; ctx.lineWidth = 2; ctx.stroke();
+  [RX - 26, RX + RW + 10].forEach(x => { ctx.fillStyle = '#161616'; ctx.fillRect(x, RY + 20, 16, h - 40); for (let k = 0; k < 30; k++) { ctx.fillStyle = '#000'; ctx.fillRect(x + 4, RY + 30 + k * 26, 8, 8); } });
+  font('600 18px JBM'); txt('RACK A · SYSTEM-DESIGN', RX, RY + 26, C.g2);
+  ctx.restore();
+}
+function unit(t, i, slideIn) {
+  if (slideIn <= 0) return;
+  const r = REPOS[i], y = unitY(i), on = onAt(t, i), u = t - SLOT_T(i);
+  const act = t >= SLOT_T(i) && t < SLOT_T(i) + R_DUR && t < T_RECAP;
+  const out = act ? eOutBack(prog(u, 0, 0.18), 1.6) * (1 - prog(u, 0.6, 0.75)) : 0;
+  const x = RX + (1 - eOutExpo(slideIn)) * 1200 + out * 60;
+  ctx.save();
+  if (act) { ctx.shadowColor = rgba(GRN, 0.6); ctx.shadowBlur = 40; }
+  ctx.fillStyle = on > 0.5 ? '#0F1A12' : '#121212'; roundRect(x, y, RW, UH, 8); ctx.fill(); ctx.restore();
+  ctx.strokeStyle = act ? GRN : '#2A2A2A'; ctx.lineWidth = act ? 2.5 : 1.5; roundRect(x, y, RW, UH, 8); ctx.stroke();
+  // ear + label plate
+  font('600 18px JBM'); txt(`U${pad2(i + 1)}`, x + 22, y + 44, on > 0.5 ? GRN : C.g2);
+  roundRect(x + 90, y + 14, 470, UH - 28, 6); ctx.fillStyle = on > 0.5 ? '#0A0A0A' : '#1A1A1A'; ctx.fill();
+  if (on > 0) {
+    ctx.save(); ctx.beginPath(); ctx.rect(x + 90, y + 14, 470 * eOutCubic(on), UH - 28); ctx.clip();
+    fit(r.name, 'IDBold', 24, 440, 14); txt(r.name, x + 106, y + 46, C.white); ctx.restore();
+  }
+  // vents
+  for (let k = 0; k < 14; k++) { ctx.fillStyle = '#060606'; ctx.fillRect(x + 590 + k * 12, y + 18, 6, UH - 36); }
+  // LEDs
+  for (let k = 0; k < 3; k++) {
+    const blink = on > 0 && on < 1 ? Math.floor(t * 20 + k) % 2 : 1;
+    const lit = on > 0 ? (k === 2 ? (Math.floor(t * 6 + i) % 3 === 0 ? 1 : 0.4) : blink) : 0;
+    ctx.fillStyle = lit ? rgba(GRN, lit) : '#2A2A2A'; ctx.beginPath(); ctx.arc(x + RW - 80 + k * 26, y + UH / 2, 7, 0, 6.283); ctx.fill();
+    if (lit > 0.9) { ctx.fillStyle = rgba(GRN, 0.25); ctx.beginPath(); ctx.arc(x + RW - 80 + k * 26, y + UH / 2, 14, 0, 6.283); ctx.fill(); }
+  }
+}
+function rack(t, a = 1) {
+  rackFrame(t, a);
+  ctx.save(); ctx.globalAlpha = a;
+  for (let i = 0; i < N; i++) unit(t, i, prog(t, 0.25 + i * 0.09, 0.6 + i * 0.09));
+  ctx.restore();
+}
+function detail(t) {
+  const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1), r = REPOS[si], u = t - SLOT_T(si), x = 1080;
+  font('600 24px JBM'); txt(`U${pad2(si + 1)} · BOOTING`, x, 250, C.g2);
+  if (onAt(t, si) >= 1) { ctx.fillStyle = '#000'; ctx.fillRect(x, 222, 400, 36); txt(`U${pad2(si + 1)} · ONLINE ✓`, x, 250, GRN); }
+  font('84px IDBlack'); const lines = wrap(r.name, 780).slice(0, 3);
+  lines.forEach((l, k) => maskRise(l, x, 360 + k * 92, prog(u, 0.03 + k * 0.04, 0.2 + k * 0.04), C.white, 84));
+  const y2 = 360 + lines.length * 92;
+  font('600 26px JBM'); txt(`by ${r.owner}`, x, y2, C.g1);
+  font('400 24px JBM'); txt(typed(url(r), prog(u, 0.1, 0.38)), x, y2 + 50, C.g2);
+  // uptime sparkline
+  ctx.strokeStyle = GRN; ctx.lineWidth = 3; ctx.beginPath();
+  const pw = 640 * eOutCubic(prog(u, 0.05, 0.6));
+  for (let k = 0; k <= 64; k++) { const px = x + (k / 64) * pw, py = y2 + 150 - (k > 8 ? 30 + Math.sin(k * 0.9 + si) * 8 : k * 3); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+  ctx.stroke();
+  font('600 20px JBM'); txt('STATUS 200 OK \u00b7 ONLINE', x, y2 + 200, GRN);
+}
+function overlays(t) {
+  if (t < T_DROP) {
+    font('600 30px JBM'); txt(typed('$ power-on --rack system-design', prog(t, 0.1, 0.9)), 1080, 500, GRN);
+    font('600 22px JBM'); txt(typed('10 units detected', prog(t, 1.0, 1.4)), 1080, 550, C.g2);
+  } else if (t < T_R0) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 300, W * eOutExpo(prog(u, 0, 0.25)), 500);
+    font('64px IDBlack'); maskRise('10 GITHUB REPOS', W / 2, 410, prog(u, 0.05, 0.25), GRN, 64, 'center');
+    font('104px IDBlack'); maskRise('EVERY DEVELOPER SHOULD KNOW', W / 2, 560, prog(u, 0.15, 0.35), C.white, 104, 'center');
+    maskRise('FOR SYSTEM DESIGN', W / 2, 690, prog(u, 0.25, 0.45), C.white, 104, 'center');
+    ctx.restore();
+  } else if (t < T_RECAP) detail(t);
+  else if (t < T_OUT) {
+    const u = t - T_RECAP, x = 1080;
+    font('600 26px JBM'); txt('ALL SYSTEMS', x, 300, GRN);
+    font('300px IDBlack'); const p = prog(u, 0.1, 0.35);
+    if (p > 0) { ctx.save(); ctx.translate(x, 600); const s = lerp(1.4, 1, eOutExpo(p)); ctx.scale(s, s); txt('10/10', 0, 0, C.white); ctx.restore(); }
+    font('64px IDBlack'); maskRise('ONLINE.', x, 700, prog(u, 0.35, 0.6), GRN, 64);
+    font('600 24px JBM'); txt(typed('bookmark the whole rack', prog(u, 0.6, 1.0)), x, 770, C.g2);
+  } else {
+    const u = t - T_OUT;
+    ctx.fillStyle = `rgba(0,0,0,${0.85 * eOutCubic(prog(u, 0, 0.35))})`; ctx.fillRect(0, 0, W, H);
+    font('150px IDBlack'); const p = prog(u, 0.2, 0.45);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 500); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('LEARN THE SYSTEMS', 0, 0, C.white, 'center'); ctx.restore(); }
+    font('150px IDBlack'); maskRise('THAT STAY UP.', W / 2, 660, prog(u, 0.35, 0.6), GRN, 150, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.75, 1.15)), W / 2, 780, C.white, 'center');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  rack(t, t >= T_DROP && t < T_R0 ? 0.45 : 1);
+  overlays(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '34,197,94', 0.4], [T_RECAP, '34,197,94', 0.3], [T_OUT, '34,197,94', 0.4]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>

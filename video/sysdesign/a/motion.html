@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>System Design A</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>window.PALETTE = { acc: '#FFB020' };</script>
+<script src="../common/lib.js"></script>
+<script>
+// Option A: "Architecture" - each repo becomes a component of a live system diagram; a request packet walks it.
+const AMB = C.acc;
+const ROLE = ['CLIENT', 'DNS', 'CDN', 'LOAD BALANCER', 'APP SERVERS', 'CACHE', 'MESSAGE QUEUE', 'DATABASE', 'ML PIPELINE', 'AI AGENTS'];
+const NW = 320, NH = 190;
+const POS = [[220, 340], [590, 340], [960, 340], [1330, 340], [1700, 340], [1700, 760], [1330, 760], [960, 760], [590, 760], [220, 760]];
+const OVER = { x: 960, y: 550, z: 0.92 };
+const NCAM = i => ({ x: POS[i][0], y: POS[i][1], z: 1.75 });
+
+function camAt(t) {
+  const mv = (a, b, p) => ({ x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), z: lerp(a.z, b.z, p) * (1 - 0.2 * Math.sin(Math.PI * p)) });
+  if (t < T_R0 - 0.2) return OVER;
+  if (t < T_RECAP - 0.1) { const i = clamp(Math.floor((t - (T_R0 - 0.2)) / R_DUR), 0, N - 1), t0 = SLOT_T(i) - 0.2; return mv(i === 0 ? OVER : NCAM(i - 1), NCAM(i), eInOutCubic(prog(t, t0, t0 + 0.32))); }
+  return mv(NCAM(N - 1), OVER, eInOutCubic(prog(t, T_RECAP - 0.1, T_RECAP + 0.4)));
+}
+const litAt = (t, i) => t >= T_RECAP ? 1 : eOutCubic(prog(t, SLOT_T(i) + 0.02, SLOT_T(i) + 0.2));
+
+// orthogonal edge between consecutive nodes
+function edgePts(i) {
+  const [x0, y0] = POS[i], [x1, y1] = POS[i + 1];
+  if (y0 === y1) { const d = Math.sign(x1 - x0); return [[x0 + d * NW / 2, y0], [x1 - d * NW / 2, y1]]; }
+  return [[x0, y0 + NH / 2], [x1, y1 - NH / 2]];
+}
+function along(pts, s) { const [a, b] = pts; return [lerp(a[0], b[0], s), lerp(a[1], b[1], s)]; }
+
+function background(t, cam) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, 1100);
+  g.addColorStop(0, rgba(AMB, 0.06 + pulseAt(t, 6) * 0.03)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // blueprint grid moving with camera
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  ctx.strokeStyle = 'rgba(255,176,32,0.06)'; ctx.lineWidth = 1 / cam.z;
+  for (let x = -400; x < 2400; x += 60) { ctx.beginPath(); ctx.moveTo(x, -300); ctx.lineTo(x, 1400); ctx.stroke(); }
+  for (let y = -300; y < 1400; y += 60) { ctx.beginPath(); ctx.moveTo(-400, y); ctx.lineTo(2400, y); ctx.stroke(); }
+  ctx.restore();
+}
+function diagram(t, cam) {
+  ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  const pre = i => eOutBack(prog(t, 0.3 + i * 0.07, 0.6 + i * 0.07), 1.6);
+  // edges
+  for (let i = 0; i < N - 1; i++) {
+    const pts = edgePts(i), on = t >= T_RECAP ? 1 : eOutCubic(prog(t, SLOT_T(i + 1) - 0.2, SLOT_T(i + 1) + 0.05));
+    ctx.setLineDash([10, 10]); ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 3; ctx.globalAlpha = clamp(pre(i + 1));
+    ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[1]); ctx.stroke(); ctx.setLineDash([]);
+    if (on > 0) { ctx.strokeStyle = AMB; ctx.lineWidth = 4; const e = along(pts, on); ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...e); ctx.stroke(); }
+    // packets
+    if (on >= 1) for (let k = 0; k < 3; k++) { const s = ((t * 1.4 + k / 3 + i * 0.17) % 1); const [px, py] = along(pts, s); ctx.fillStyle = C.white; ctx.beginPath(); ctx.arc(px, py, 6, 0, 6.283); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+  // the travelling request packet (head)
+  if (t >= T_R0 - 0.2 && t < T_RECAP) {
+    const i = clamp(Math.floor((t - (T_R0 - 0.2)) / R_DUR), 0, N - 1);
+    if (i > 0) { const p = eInOutCubic(prog(t, SLOT_T(i) - 0.2, SLOT_T(i) + 0.05)); if (p < 1) { const [px, py] = along(edgePts(i - 1), p); ctx.fillStyle = AMB; ctx.beginPath(); ctx.arc(px, py, 14, 0, 6.283); ctx.fill(); ctx.strokeStyle = rgba(AMB, 0.4); ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(px, py, 26, 0, 6.283); ctx.stroke(); } }
+  }
+  // nodes
+  for (let i = 0; i < N; i++) {
+    const s = pre(i); if (s <= 0) continue;
+    const [x, y] = POS[i], lit = litAt(t, i), r = REPOS[i], u = t - SLOT_T(i);
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    if (lit > 0.5) { const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 280); g.addColorStop(0, rgba(AMB, 0.18 * lit)); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(-300, -300, 600, 600); }
+    roundRect(-NW / 2, -NH / 2, NW, NH, 18); ctx.fillStyle = lit > 0.5 ? '#14100A' : '#0A0A0A'; ctx.fill();
+    if (lit > 0.5) { ctx.strokeStyle = AMB; ctx.lineWidth = 3; ctx.stroke(); } else { ctx.setLineDash([8, 8]); ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]); }
+    font('600 15px JBM'); txt(`${pad2(i + 1)} · ${ROLE[i]}`, -NW / 2 + 18, -NH / 2 + 30, lit > 0.5 ? AMB : C.g2);
+    ctx.fillStyle = lit > 0.5 ? AMB : C.g3; ctx.beginPath(); ctx.arc(NW / 2 - 22, -NH / 2 + 24, 6, 0, 6.283); ctx.fill();
+    if (lit > 0) {
+      ctx.save(); ctx.globalAlpha *= lit;
+      font('30px IDBlack'); const lines = wrap(r.name, NW - 36).slice(0, 2);
+      lines.forEach((l, k) => maskRise(l, -NW / 2 + 18, -NH / 2 + 78 + k * 34, t >= T_RECAP ? 1 : prog(u, 0.05 + k * 0.04, 0.22 + k * 0.04), C.white, 30));
+      font('400 14px JBM'); fit(r.path, 'JBM', 15, NW - 36, 10); txt(typed(r.path, t >= T_RECAP ? 1 : prog(u, 0.1, 0.35)), -NW / 2 + 18, NH / 2 - 22, C.g1);
+      ctx.restore();
+    } else { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(-NW / 2 + 18, -10, 180, 22); ctx.fillRect(-NW / 2 + 18, 24, 120, 22); }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+function overlays(t) {
+  if (t < T_DROP) {
+    font('600 30px JBM'); txt(typed('GET /how-to-design-systems  HTTP/1.1', prog(t, 0.2, 1.2)), W / 2, 110, AMB, 'center');
+    font('600 22px JBM'); txt(typed('routing request through 10 components…', prog(t, 1.1, 1.7)), W / 2, 155, C.g2, 'center');
+  } else if (t < T_R0) {
+    const u = t - T_DROP, out = eInExpo(prog(t, T_R0 - 0.25, T_R0));
+    ctx.save(); ctx.globalAlpha = 1 - out;
+    ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 300, W * eOutExpo(prog(u, 0, 0.25)), 500);
+    font('64px IDBlack'); maskRise('10 GITHUB REPOS', W / 2, 410, prog(u, 0.05, 0.25), AMB, 64, 'center');
+    font('104px IDBlack'); maskRise('EVERY DEVELOPER SHOULD KNOW', W / 2, 560, prog(u, 0.15, 0.35), C.white, 104, 'center');
+    font('104px IDBlack'); maskRise('FOR SYSTEM DESIGN', W / 2, 690, prog(u, 0.25, 0.45), C.white, 104, 'center');
+    ctx.restore();
+  } else if (t < T_RECAP) {
+    const si = clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1);
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(60, 110, 420, 56, 28); ctx.fill();
+    font('600 22px JBM'); txt(`HOP ${pad2(si + 1)} / 10 · ${ROLE[si]}`, 270, 146, AMB, 'center');
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(W / 2 - 430, H - 140, 860, 60, 30); ctx.fill();
+    font('600 24px JBM'); txt(url(REPOS[si]), W / 2, H - 100, C.white, 'center');
+  } else if (t < T_OUT) {
+    const u = t - T_RECAP;
+    font('600 26px JBM'); txt(typed('200 OK · 10 components · 10 repos', prog(u, 0.3, 0.8)), W / 2, 110, AMB, 'center');
+  } else {
+    const u = t - T_OUT;
+    ctx.fillStyle = `rgba(0,0,0,${0.85 * eOutCubic(prog(u, 0, 0.35))})`; ctx.fillRect(0, 0, W, H);
+    font('170px IDBlack'); const p = prog(u, 0.2, 0.45);
+    if (p > 0) { ctx.save(); ctx.translate(W / 2, 520); const s = lerp(1.5, 1, eOutExpo(p)); ctx.scale(s, s); ctx.globalAlpha = clamp(p * 3); txt('DESIGN IT.', 0, 0, C.white, 'center'); ctx.restore(); }
+    font('170px IDBlack'); maskRise('SCALE IT.', W / 2, 690, prog(u, 0.35, 0.6), AMB, 170, 'center');
+    font('600 30px JBM'); txt(typed('follow x.com/nrqa__ for more', prog(u, 0.75, 1.15)), W / 2, 800, C.white, 'center');
+  }
+}
+
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  const cam = camAt(t);
+  background(t, cam);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 18 * shake, (hash(frame + 5) - 0.5) * 18 * shake);
+  ctx.save(); if (t >= T_DROP && t < T_R0) ctx.globalAlpha = 0.5; diagram(t, cam); ctx.restore();
+  overlays(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,176,32', 0.4], [T_RECAP, '255,176,32', 0.25], [T_OUT, '255,176,32', 0.4]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+</script>
+</body>
+</html>
