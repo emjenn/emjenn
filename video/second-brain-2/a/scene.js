@@ -1,0 +1,90 @@
+// Option A: "Rolodex" - a card file spins; each project's card flips to the front and stays filed behind.
+const RCX = 960, RCY = 620, CW = 980, CH = 460;
+function rolPos(t) {
+  if (t < T_R0) return -1.5 + eOutCubic(prog(t, T_R0 - 0.4, T_R0)) * 1.5;
+  if (t >= T_RECAP) return N - 1;
+  const k = (t - T_R0) / R_DUR, i = Math.floor(k), f = k - i;
+  return Math.min(N - 1, i + eOutBack(clamp(f / 0.35), 1.6) - 1 + (i === 0 && f < 0.35 ? 0 : 0) + (f >= 0.35 ? 0 : 0)) + (f >= 0.35 ? 0 : 0);
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(RCX, 520, 0, RCX, 520, 1000);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function card(i, ang, t, active) {
+  // ang 0 = front-up, positive = rotated back over the top of the drum
+  const r = 300, y = RCY - Math.cos(ang) * r * 0.25 - Math.sin(ang) * r, sc = Math.cos(ang);
+  if (sc <= 0.02) return;
+  const rr = REPOS[i];
+  ctx.save(); ctx.translate(RCX, y); ctx.scale(1, sc); ctx.globalAlpha *= clamp(0.25 + sc);
+  roundRect(-CW / 2, -CH, CW, CH, 18); ctx.fillStyle = active ? '#F4F4F4' : '#D8D8D8'; ctx.fill();
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#000'; ctx.fillRect(-CW / 2 + 40, -CH + 100, CW - 80, 3);
+  for (let k = 0; k < 5; k++) ctx.fillRect(-CW / 2 + 40, -CH + 190 + k * 50, CW - 80, 1);
+  // slot notches
+  ctx.fillStyle = '#000'; [-120, 120].forEach(x => { roundRect(x - 30, -18, 60, 24, 12); ctx.fill(); });
+  font('600 30px JBM'); txt(rr.n, -CW / 2 + 40, -CH + 72, '#000');
+  const ns = fit(rr.name, 'IDBlack', 92, CW - 80, 40); txt(rr.name, -CW / 2 + 40, -CH + 110 + ns + 20, '#000');
+  font('400 26px JBM'); fit('↳ ' + rr.url, 'JBM', 26, CW - 80, 14); txt('↳ ' + rr.url, -CW / 2 + 40, -70, '#333');
+  ctx.restore();
+}
+function rolodex(t, a) {
+  ctx.save(); ctx.globalAlpha = a;
+  // drum + rod
+  ctx.fillStyle = '#1A1A1A'; roundRect(RCX - CW / 2 - 80, RCY - 20, CW + 160, 40, 20); ctx.fill();
+  ctx.fillStyle = '#2A2A2A'; [RCX - CW / 2 - 70, RCX + CW / 2 + 30].forEach(x => { roundRect(x, RCY - 10, 40, 280, 12); ctx.fill(); });
+  roundRect(RCX - 400, RCY + 250, 800, 40, 12); ctx.fill();
+  const cur = t >= T_R0 && t < T_RECAP ? clamp(Math.floor((t - T_R0) / R_DUR), 0, N - 1) : (t >= T_RECAP ? N - 1 : -1);
+  // flip progress of current card
+  const fp = cur >= 0 && t < T_RECAP ? eOutBack(prog(t, SLOT_T(cur), SLOT_T(cur) + 0.2), 1.4) : 1;
+  // filed cards (already shown) lean back behind; upcoming cards are below the drum (hidden)
+  for (let i = 0; i <= Math.max(cur - 1, -1); i++) {
+    const depth = cur - i - (1 - fp) * 0;
+    card(i, 0.5 + Math.min(depth, 6) * 0.12, t, false);
+  }
+  if (cur >= 0) card(cur, lerp(-1.4, 0, fp), t, true);
+  ctx.restore();
+}
+function sideIndex(t) {
+  // compact running index on the left (names as provided)
+  const cur = t >= T_RECAP ? N : clamp(Math.floor((t - T_R0) / R_DUR) + 1, 0, N);
+  for (let i = 0; i < cur; i++) {
+    const p = t >= T_RECAP ? 1 : prog(t, SLOT_T(i) + 0.1, SLOT_T(i) + 0.3);
+    ctx.save(); ctx.globalAlpha = eOutCubic(p) * (i === cur - 1 && t < T_RECAP ? 1 : 0.55);
+    font('600 15px JBM'); txt(REPOS[i].n, 40, 110 + i * 42, C.g2);
+    font('20px IDBold'); txt(REPOS[i].name, 90, 110 + i * 42, C.white);
+    ctx.restore();
+  }
+}
+function intro(t) {
+  // drum rotates in with blank cards ticking - no words
+  ctx.save(); ctx.globalAlpha = eOutCubic(prog(t, 0.1, 0.6));
+  for (let k = 0; k < 8; k++) { const a = ((t * 2.5 + k * 0.4) % 3.2) - 1.6; const sc = Math.cos(a); if (sc <= 0.05) continue; ctx.save(); ctx.translate(RCX, RCY - Math.sin(a) * 300); ctx.scale(1, sc); roundRect(-CW / 2, -CH, CW, CH, 18); ctx.fillStyle = `rgba(216,216,216,${0.2 + 0.5 * sc})`; ctx.fill(); ctx.restore(); }
+  ctx.restore();
+  ghMark(RCX, 380, 140 * eOutBack(prog(t, 1.0, 1.5), 2), C.white);
+}
+function closing(t) {
+  // no text: cards fan out radially and fold into the mark
+  const u = t - T_OUT, p = eInOutCubic(prog(u, 0.05, 0.75));
+  for (let i = 0; i < N; i++) {
+    const a = i / N * 6.283, x = RCX + Math.cos(a) * 700 * Math.sin(p * Math.PI) , y = 540 + Math.sin(a) * 380 * Math.sin(p * Math.PI);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a + p * 2); const s = 0.22 * (1 - p); ctx.scale(s, s); ctx.globalAlpha = 1 - p;
+    roundRect(-CW / 2, -CH / 2, CW, CH, 18); ctx.fillStyle = '#E0E0E0'; ctx.fill(); ctx.restore();
+  }
+  const m = eOutBack(prog(u, 0.6, 1.05), 1.8); ghMark(960, 540, 340 * m, C.white);
+  const rp = prog(u, 0.65, 1.4); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(960, 540, 220 + rp * 600, 0, 6.283); ctx.stroke(); }
+}
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  for (let i = 0; i < N; i++) if (t >= SLOT_T(i)) shake = Math.max(shake, 0.2 * Math.exp(-(t - SLOT_T(i)) * 16));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 16 * shake, (hash(frame + 5) - 0.5) * 16 * shake);
+  if (t < T_DROP) intro(t);
+  else if (t < T_OUT) { rolodex(t, t < T_R0 ? 0.3 : 1); if (t >= T_R0) sideIndex(t); titleCard(t, W / 2, 'center'); }
+  else closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.2], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));

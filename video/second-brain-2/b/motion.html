@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Second Brain 2 B</title>
+<style>
+  @font-face { font-family: IDBlack; src: url(../../fonts/InterDisplay-Black.otf); }
+  @font-face { font-family: IDBold;  src: url(../../fonts/InterDisplay-Bold.otf); }
+  @font-face { font-family: IDMed;   src: url(../../fonts/InterDisplay-Medium.otf); }
+  @font-face { font-family: NR;      src: url(../../fonts/Newsreader-Italic.ttf); font-style: italic; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-400.ttf); font-weight: 400; }
+  @font-face { font-family: JBM;     src: url(../../fonts/JetBrainsMono-600.ttf); font-weight: 600; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../common/lib.js"></script>
+<script>
+// Option B: "Kinetic Scroll" - the whole list scrolls like credits; the row at centre grows and lights up.
+const ROW = 104, CENTER = 560, LX = 200;
+function scrollIdx(t) {
+  if (t < T_R0) return -2.5 + eOutCubic(prog(t, T_R0 - 0.5, T_R0)) * 2.5;
+  if (t >= T_RECAP) return N - 1;
+  const k = (t - T_R0) / R_DUR, i = Math.floor(k), f = k - i;
+  return Math.min(N - 1, i - 1 + eInOutCubic(clamp(f / 0.3)));
+}
+function background(t) {
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(960, CENTER, 0, 960, CENTER, 1100);
+  g.addColorStop(0, `rgba(255,255,255,${0.05 + pulseAt(t, 6) * 0.03})`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function list(t, a) {
+  const s = scrollIdx(t), reveal = t >= T_RECAP ? eInOutCubic(prog(t, T_RECAP, T_RECAP + 0.45)) : 0;
+  ctx.save(); ctx.globalAlpha = a;
+  // focus band
+  if (reveal < 1) { ctx.fillStyle = `rgba(255,255,255,${0.06 * (1 - reveal)})`; ctx.fillRect(0, CENTER - 80, W, 150); ctx.fillStyle = `rgba(255,255,255,${0.8 * (1 - reveal)})`; ctx.fillRect(LX - 60, CENTER - 60, 6, 110); }
+  for (let i = 0; i < N; i++) {
+    const d = i - s, focus = clamp(1 - Math.abs(d)), r = REPOS[i];
+    // scroll layout vs final 2-column grid
+    const sy = CENTER + d * ROW + Math.sign(d) * (Math.abs(d) > 0.5 ? 40 : Math.abs(d) * 80);
+    const gx = 160 + Math.floor(i / 10) * 830, gy = 160 + (i % 10) * 86;
+    const x = lerp(LX, gx, reveal), y = lerp(sy, gy, reveal);
+    if (y < -100 || y > H + 100) continue;
+    const size = lerp(lerp(46, 104, focus), 40, reveal);
+    const alpha = lerp(clamp(1 - Math.abs(d) * 0.18) * (i <= Math.ceil(s) + 0 || t < T_R0 ? 1 : 0.25), 1, reveal);
+    ctx.save(); ctx.globalAlpha *= alpha;
+    font(`600 ${Math.round(lerp(lerp(22, 32, focus), 20, reveal))}px JBM`); txt(r.n, x, y - (size * 0.35), focus > 0.5 && reveal < 0.5 ? C.white : C.g2);
+    font(`${Math.round(size)}px IDBlack`); txt(r.name, x + lerp(lerp(80, 110, focus), 70, reveal), y, C.white);
+    const nw = ctx.measureText(r.name).width;
+    const linkA = reveal > 0.5 ? 1 : focus;
+    if (linkA > 0.05) { ctx.save(); ctx.globalAlpha *= linkA; font(`400 ${Math.round(lerp(24, 14, reveal))}px JBM`);
+      if (reveal > 0.5) txt(r.url, x + 70, y + 24, C.g2);
+      else txt('↳ ' + r.url, x + 110 + nw + 40, y - 8, C.g1); ctx.restore(); }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+function intro(t) {
+  // stacked horizontal bars fall like a list skeleton, then the mark - no words
+  for (let k = 0; k < 9; k++) { const p = eOutBack(prog(t, 0.1 + k * 0.08, 0.5 + k * 0.08), 1.4); ctx.fillStyle = `rgba(255,255,255,${0.08 + (k === 4 ? 0.5 : 0)})`; roundRect(LX, 150 + k * 90 - (1 - p) * 600, 400 + hash(k) * 900, k === 4 ? 70 : 34, 10); ctx.fill(); }
+  ghMark(1650, 540, 160 * eOutBack(prog(t, 1.1, 1.6), 2), C.white);
+}
+function closing(t) {
+  // no text: rows slam into horizontal lines that converge into the mark
+  const u = t - T_OUT, p = eInOutCubic(prog(u, 0.05, 0.6));
+  for (let i = 0; i < N; i++) {
+    const gx = 160 + Math.floor(i / 10) * 830, gy = 160 + (i % 10) * 86;
+    const w = lerp(600, 0, p), x = lerp(gx, 960, p), y = lerp(gy, 540, p);
+    ctx.fillStyle = `rgba(255,255,255,${0.8 * (1 - p)})`; ctx.fillRect(x - (1 - p) * 0, y - 4, w, 8);
+  }
+  const m = eOutBack(prog(u, 0.55, 1.0), 1.8); ghMark(960, 540, 340 * m, C.white);
+  const rp = prog(u, 0.6, 1.35); if (rp > 0 && rp < 1) { ctx.strokeStyle = `rgba(255,255,255,${1 - rp})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(960, 540, 220 + rp * 600, 0, 6.283); ctx.stroke(); }
+}
+function render(t, frame) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  background(t);
+  let shake = 0; for (const h of [T_DROP, T_OUT]) if (t >= h) shake = Math.max(shake, Math.exp(-(t - h) * 8));
+  ctx.save(); ctx.translate((hash(frame) - 0.5) * 16 * shake, (hash(frame + 5) - 0.5) * 16 * shake);
+  if (t < T_DROP) intro(t);
+  else if (t < T_OUT) { if (t >= T_R0 - 0.5) list(t, 1); titleCard(t, W / 2, 'center'); }
+  else closing(t);
+  ctx.restore();
+  flashes(t, [[T_DROP, '255,255,255', 0.45], [T_RECAP, '255,255,255', 0.2], [T_OUT, '255,255,255', 0.45]]);
+  finish(t, frame);
+}
+window.ready = FONTS_READY.then(() => render(0, 0));
+
+</script>
+</body>
+</html>
