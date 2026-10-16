@@ -1,0 +1,295 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Option A Kinetic Slam</title>
+<link rel="stylesheet" href="fonts.css">
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="common.js"></script>
+<script>
+// OPTION A: KINETIC SLAM. 128 BPM house. Big type slams on the beat, slab wipes between prompts.
+const BEAT = 60 / 128;
+const T_DROP = 4 * BEAT;
+const T_P = PROMPTS.map((_, i) => 8 * BEAT + i * 3 * BEAT);
+const PD = 3 * BEAT;
+const T_OUT = T_P[6] + PD;
+const KICKS = [0, BEAT, 2 * BEAT, 3 * BEAT];
+for (let t = T_DROP; t < T_OUT - 1e-6; t += BEAT) KICKS.push(t);
+KICKS.push(T_OUT);
+
+let BODY = null; // laid out on first render, once fonts are loaded
+
+function slab(p, dir, color, skew = 0.35) {
+  // a skewed parallelogram that sweeps across the frame
+  if (p <= 0 || p >= 1) return;
+  const span = W * 2.2, x = lerp(-W * 0.9, W * 1.3, p);
+  ctx.save();
+  if (dir < 0) { ctx.translate(W, 0); ctx.scale(-1, 1); }
+  ctx.beginPath();
+  ctx.moveTo(x - W * 0.35, 0); ctx.lineTo(x + W * 0.25, 0);
+  ctx.lineTo(x + W * 0.25 - H * skew, H); ctx.lineTo(x - W * 0.35 - H * skew, H);
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+  ctx.restore();
+}
+
+function speedLines(t, alpha, seed) {
+  const r = mulberry(seed);
+  ctx.save(); ctx.strokeStyle = rgba(C.latte, alpha); ctx.lineWidth = 2;
+  for (let i = 0; i < 26; i++) {
+    const y = r() * H, len = 120 + r() * 380, sp = 900 + r() * 1800;
+    const x = ((r() * W * 2 + t * sp) % (W + len * 2)) - len;
+    ctx.globalAlpha = 0.3 + r() * 0.7;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function orbitRig(cx, cy, R, t, pulse, a = 1) {
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.globalAlpha = a;
+  ctx.lineWidth = 2;
+  // dashed outer ring
+  ctx.rotate(t * 0.5);
+  ctx.setLineDash([4, 14]); ctx.strokeStyle = rgba(C.latte, .5);
+  ctx.beginPath(); ctx.arc(0, 0, R * (1 + pulse * .04), 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+  // arc segments
+  ctx.rotate(-t * 1.3);
+  ctx.strokeStyle = C.caramel; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.82, 0, Math.PI * 0.55); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.82, Math.PI, Math.PI * 1.25); ctx.stroke();
+  ctx.lineWidth = 2; ctx.strokeStyle = rgba(C.mocha, .9);
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.64, 0, Math.PI * 2); ctx.stroke();
+  // orbiting dot
+  ctx.rotate(t * 2.6);
+  ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(R, 0, 7 + pulse * 5, 0, Math.PI * 2); ctx.fill();
+  // tick marks
+  ctx.strokeStyle = rgba(C.light, .45); ctx.lineWidth = 2;
+  for (let k = 0; k < 48; k++) {
+    const an = k / 48 * Math.PI * 2, l = k % 4 === 0 ? 18 : 8;
+    ctx.beginPath(); ctx.moveTo(Math.cos(an) * (R * 1.12), Math.sin(an) * (R * 1.12));
+    ctx.lineTo(Math.cos(an) * (R * 1.12 + l), Math.sin(an) * (R * 1.12 + l)); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function burst(cx, cy, p, n, r0, r1, color, width = 4, seed = 3) {
+  if (p <= 0 || p >= 1) return;
+  const r = mulberry(seed);
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    const an = i / n * Math.PI * 2 + r() * 0.2;
+    const a = lerp(r0, r1, eOutExpo(p)), b = lerp(r0, r1, eOutExpo(clamp(p * 1.6 - 0.25)));
+    ctx.globalAlpha = 1 - p;
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(an) * b, cy + Math.sin(an) * b);
+    ctx.lineTo(cx + Math.cos(an) * a, cy + Math.sin(an) * a); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function ring(cx, cy, p, rMax, color, w = 6) {
+  if (p <= 0 || p >= 1) return;
+  ctx.save(); ctx.strokeStyle = color; ctx.globalAlpha = 1 - p; ctx.lineWidth = w * (1 - p) + 1;
+  ctx.beginPath(); ctx.arc(cx, cy, rMax * eOutExpo(p), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+}
+
+// ------------------------------------------------------------- title
+function titleScene(t, pulse) {
+  const cx = W / 2, cy = H / 2;
+  if (t < T_DROP) {
+    const k = Math.floor(t / BEAT), u = t - k * BEAT, p = eOutExpo(clamp(u / 0.22));
+    ring(cx, cy, clamp(u / 0.5), 900, C.caramel, 10);
+    ctx.save(); ctx.translate(cx, cy);
+    const zoom = 1 + (t / T_DROP) * 0.06;
+    ctx.scale(zoom, zoom);
+    if (k === 0) {
+      const s = lerp(1.6, 1, p); ctx.scale(s, s);
+      font('220px IDBlack'); txt('Copy these', 0, 75, C.cream, 'center');
+    } else if (k === 1) {
+      ctx.rotate(lerp(-0.25, -0.04, p));
+      const s = lerp(0.3, 1, eOutBack(clamp(u / 0.3), 2.2)); ctx.scale(s, s);
+      font('980px IDBlack');
+      ctx.lineWidth = 3; ctx.strokeStyle = rgba(C.latte, .35);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      for (let e = 3; e >= 1; e--) ctx.strokeText('7', -e * 38 * (1 - p * .3), 340 + e * 22);
+      txt('7', 0, 340, C.caramel, 'center');
+    } else if (k === 2) {
+      const s = lerp(1.5, 1, p); ctx.scale(s, s);
+      font('250px IDBlack'); txt('prompts', 0, 80, C.cream, 'center');
+      const w = ctx.measureText('prompts').width;
+      ctx.fillStyle = C.caramel; ctx.fillRect(-w / 2, 120, w * eOutExpo(clamp(u / 0.3)), 16);
+    } else {
+      font('112px IDBlack');
+      const words = 'before your next job interview'.split(' ');
+      const lines = [words.slice(0, 3).join(' '), words.slice(3).join(' ')];
+      lines.forEach((l, li) => {
+        const sub = l.split(' '); let x = -ctx.measureText(l).width / 2;
+        sub.forEach((wd, wi) => {
+          const idx = li * 3 + wi;
+          const pp = eOutExpo(clamp((u - idx * 0.045) / 0.18));
+          maskRise(wd, x, li * 130 - 10, pp, li ? C.caramel : C.cream, 112, 'left');
+          x += ctx.measureText(wd + ' ').width;
+        });
+      });
+    }
+    ctx.restore();
+    return;
+  }
+  // ---- the drop: full lockup
+  const u = t - T_DROP;
+  const out = eInExpo(prog(t, T_P[0] - 0.32, T_P[0] - 0.02));
+  ctx.save();
+  ctx.translate(0, -out * 120);
+  ctx.globalAlpha = 1 - out;
+  orbitRig(1580, 540, 250, t, pulse, eOutExpo(clamp(u / 0.6)));
+  // big 7 inside rig
+  ctx.save(); ctx.translate(1580, 540);
+  const s7 = eOutBack(clamp(u / 0.45), 2) * (1 + pulse * 0.05); ctx.scale(s7, s7);
+  font('330px IDBlack'); txt('7', 0, 118, C.caramel, 'center');
+  ctx.restore();
+  const lines = [['Copy these ', '7', ' prompts'], ['before your next'], ['job interview']];
+  const x0 = 140, ys = [400, 548, 696], size = 128;
+  font(`${size}px IDBlack`);
+  lines.forEach((parts, li) => {
+    const p = eOutExpo(clamp((u - li * 0.07) / 0.45));
+    let x = x0;
+    parts.forEach(s => {
+      maskRise(s, x, ys[li], p, s === '7' ? C.caramel : (li === 2 ? C.light : C.cream), size);
+      x += ctx.measureText(s).width;
+    });
+  });
+  // highlight sweep under "job interview"
+  const wJi = ctx.measureText('job interview').width;
+  ctx.fillStyle = C.caramel; ctx.globalAlpha = (1 - out) * 0.9;
+  ctx.fillRect(x0, ys[2] + 34, wJi * eInOutExpo(clamp((u - 0.35) / 0.5)), 14);
+  ctx.globalAlpha = 1 - out;
+  sparkle(150 + wJi + 70, ys[2] - 100, 34 * eOutBack(clamp((u - 0.5) / 0.4), 3), C.gold, t * 1.5);
+  ctx.restore();
+  // impact
+  burst(W / 2, H / 2, clamp(u / 0.7), 40, 80, 1300, C.light, 4, 9);
+  ring(W / 2, H / 2, clamp(u / 0.6), 1400, C.caramel, 24);
+  if (u < 0.12) { ctx.fillStyle = rgba(C.cream, (1 - u / 0.12) * 0.85); ctx.fillRect(0, 0, W, H); }
+}
+
+// ------------------------------------------------------------- prompt card
+function promptScene(i, t, pulse) {
+  const u = t - T_P[i], P = PROMPTS[i];
+  const exitP = eInExpo(prog(u, PD - 0.2, PD - 0.02));
+  ctx.save();
+  ctx.globalAlpha = 1 - exitP * 0.9;
+  ctx.translate(-exitP * 160 * (i % 2 ? -1 : 1), 0);
+
+  // giant ghost number in background
+  ctx.save();
+  font('720px IDBlack'); ctx.globalAlpha *= 0.07;
+  txt(String(i + 1), W - 120 + (1 - eOutExpo(clamp(u / 0.8))) * 300 - u * 40, 900, C.latte, 'right');
+  ctx.restore();
+
+  // number + rig on the left
+  const ncx = 360, ncy = 520;
+  orbitRig(ncx, ncy, 230, t + i, pulse, eOutExpo(clamp(u / 0.4)));
+  ctx.save(); ctx.translate(ncx, ncy);
+  const sN = lerp(1.7, 1, eOutExpo(clamp(u / 0.3))) * (1 + pulse * 0.04);
+  ctx.scale(sN, sN);
+  font('230px IDBlack');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.lineWidth = 3; ctx.strokeStyle = C.caramel; ctx.strokeText(P.n, 0, 82);
+  // liquid fill rising
+  const fillP = eInOutCubic(clamp((u - 0.05) / 0.5));
+  ctx.save(); ctx.beginPath(); ctx.rect(-260, 82 - 215 * fillP - 6 * Math.sin(u * 20), 520, 400); ctx.clip();
+  txt(P.n, 0, 82, C.caramel, 'center');
+  ctx.restore();
+  ctx.restore();
+
+  // title
+  const x0 = 700, maxW = 1100;
+  let size = 104; font(`${size}px IDBlack`);
+  while (ctx.measureText(P.title).width > maxW && size > 60) { size -= 2; font(`${size}px IDBlack`); }
+  const titleY = 440;
+  let x = x0;
+  P.title.split(' ').forEach((wd, wi) => {
+    const p = eOutExpo(clamp((u - 0.04 - wi * 0.05) / 0.35));
+    maskRise(wd, x, titleY, p, C.cream, size);
+    x += ctx.measureText(wd + ' ').width;
+  });
+  // rule
+  const ruleP = eInOutExpo(clamp((u - 0.1) / 0.45));
+  ctx.fillStyle = C.caramel; ctx.fillRect(x0, titleY + 40, maxW * ruleP, 5);
+  ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(x0 + maxW * ruleP, titleY + 42.5, 9 * (ruleP < 1 ? 1 : 1 - clamp((u - 0.55) * 4)), 0, Math.PI * 2); ctx.fill();
+  // body
+  drawRich(BODY[i], x0, titleY + 135, 64, clamp((u - 0.1) / 0.45), { size: 44, color: C.light, hlColor: C.gold, spread: 5 });
+
+  // progress chips
+  for (let k = 0; k < 7; k++) {
+    const cx = x0 + k * 46, cy = titleY - 150;
+    const on = k < i ? 1 : k === i ? eOutBack(clamp(u / 0.3)) : 0;
+    ctx.fillStyle = k <= i ? C.caramel : rgba(C.mocha, .7);
+    rrect(cx, cy - 4, k === i ? 34 * on + 4 : 30, 8, 4); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ------------------------------------------------------------- outro (no text)
+function outroScene(t) {
+  const u = t - T_OUT, cx = W / 2, cy = H / 2;
+  ring(cx, cy, clamp(u / 0.9), 1300, C.caramel, 30);
+  ring(cx, cy, clamp((u - 0.12) / 1.0), 1100, C.light, 10);
+  burst(cx, cy, clamp(u / 1.0), 64, 60, 1400, C.latte, 3, 21);
+  // a ring of 7 dots, one per prompt, collapsing into the sparkle
+  const col = eInOutExpo(prog(u, 0.35, 1.0));
+  for (let k = 0; k < 7; k++) {
+    const an = k / 7 * Math.PI * 2 + u * 2.2 - Math.PI / 2;
+    const R = lerp(320, 0, col) * eOutBack(clamp(u / 0.35));
+    ctx.fillStyle = k % 2 ? C.caramel : C.gold;
+    ctx.beginPath(); ctx.arc(cx + Math.cos(an) * R, cy + Math.sin(an) * R, 14 * (1 - col * 0.6), 0, Math.PI * 2); ctx.fill();
+  }
+  const grow = eOutElastic(prog(u, 0.9, 1.5)), shrink = eInExpo(prog(u, 1.05, 1.38));
+  const sr = 170 * grow * (1 - shrink);
+  sparkle(cx, cy, sr * 1.15, rgba(C.caramel, .5), u * 0.8 + 0.4);
+  sparkle(cx, cy, sr, C.gold, u * 0.8);
+  if (u > 1.0 && u < 1.12) { ctx.fillStyle = rgba(C.gold, (1 - (u - 1.0) / 0.12) * 0.25); ctx.fillRect(0, 0, W, H); }
+}
+
+// ------------------------------------------------------------- main
+function render(t, f) {
+  if (!BODY) BODY = PROMPTS.map(p => layoutRich(p.body, '44px IDMed', 1100));
+  clear();
+  const pulse = pulseAt(t, KICKS, 9);
+  // camera: shake + punch on kicks
+  const sr = mulberry(f + 1);
+  const shake = pulse * (t >= T_DROP && t < T_OUT ? 5 : 3);
+  ctx.save();
+  ctx.translate(W / 2 + (sr() - .5) * shake, H / 2 + (sr() - .5) * shake);
+  const z = 1 + pulse * 0.012; ctx.scale(z, z);
+  ctx.translate(-W / 2, -H / 2);
+
+  if (t >= T_DROP && t < T_OUT) speedLines(t, 0.12 + pulse * 0.1, 4);
+
+  if (t < T_P[0]) titleScene(t, pulse);
+  else if (t < T_OUT) {
+    const i = Math.min(6, Math.floor((t - T_P[0]) / PD));
+    promptScene(i, t, pulse);
+  } else outroScene(t);
+  ctx.restore();
+
+  // slab wipes between sections
+  T_P.forEach((tp, i) => {
+    const p = prog(t, tp - 0.24, tp + 0.24);
+    const d = i % 2 ? -1 : 1;
+    slab(eInOutCubic(clamp(p * 1.08)), d, C.caramel);
+    slab(eInOutCubic(clamp(p * 1.08 - 0.08)), d, C.espDeep);
+  });
+  slab(eInOutCubic(prog(t, T_OUT - 0.22, T_OUT + 0.22)), 1, C.gold);
+
+  vignette(0.55);
+  grain(f, 0.05);
+  // fade to black at the very end (watermark stays)
+  const fe = prog(t, 14.55, 14.95);
+  if (fe > 0) { ctx.fillStyle = `rgba(0,0,0,${fe})`; ctx.fillRect(0, 0, W, H); }
+  watermark();
+}
+</script>
+</body>
+</html>

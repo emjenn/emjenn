@@ -1,0 +1,261 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Option C Orbit Carousel</title>
+<link rel="stylesheet" href="fonts.css">
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="common.js"></script>
+<script>
+// OPTION C: ORBIT. 160 BPM liquid drum & bass. Editorial serif title, then a 3D ring of 7 cards
+// that rotates one step per bar, bringing each prompt to the front.
+const BEAT = 60 / 160;
+const T_P = PROMPTS.map((_, i) => 6 * BEAT + i * 4 * BEAT);
+const PD = 4 * BEAT;
+const T_OUT = T_P[6] + PD;
+const KICKS = [0, 2 * BEAT, 4 * BEAT];
+const SNARES = [];
+for (let b = 0; b < 7; b++) {
+  const bt = T_P[0] + b * 4 * BEAT;
+  KICKS.push(bt, bt + 10 * BEAT / 4);
+  SNARES.push(bt + BEAT, bt + 3 * BEAT);
+}
+KICKS.push(T_OUT);
+
+let BODY = null;
+const CW = 1240, CH = 560;
+
+function orbits(t, pulse, expand = 0, alpha = 1) {
+  const cx = W / 2, cy = H / 2 + 40;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  for (let k = 0; k < 6; k++) {
+    const rx = (380 + k * 210) * (1 + expand * (1 + k * 0.3)), ry = rx * 0.26;
+    ctx.strokeStyle = rgba(k % 2 ? C.mocha : C.caramel, (0.38 - k * 0.04) * alpha * (1 + pulse * 0.5));
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, -0.06, 0, Math.PI * 2); ctx.stroke();
+    // a traveller on each orbit
+    const an = t * (0.6 - k * 0.07) * (k % 2 ? -1 : 1) + k * 1.3;
+    const px = cx + Math.cos(an) * rx * Math.cos(-0.06) - Math.sin(an) * ry * Math.sin(-0.06);
+    const py = cy + Math.cos(an) * rx * Math.sin(-0.06) + Math.sin(an) * ry * Math.cos(-0.06);
+    ctx.fillStyle = rgba(k % 2 ? C.latte : C.gold, alpha);
+    ctx.beginPath(); ctx.arc(px, py, 4 + (k === 1 ? pulse * 4 : 0), 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function dust(t, alpha) {
+  const r = mulberry(12);
+  ctx.save();
+  for (let k = 0; k < 110; k++) {
+    const x = (r() * W + t * (10 + r() * 40)) % W, y = (r() * H - t * (5 + r() * 25) + H) % H;
+    const tw = 0.4 + 0.6 * Math.sin(t * (1 + r() * 3) + k);
+    ctx.fillStyle = rgba(r() > .7 ? C.gold : C.latte, alpha * tw * 0.55);
+    ctx.fillRect(x, y, r() > .85 ? 3 : 2, r() > .85 ? 3 : 2);
+  }
+  ctx.restore();
+}
+
+// ------------------------------------------------------------- title
+function titleScene(t, pulse) {
+  const out = eInCubic(prog(t, T_P[0] - 0.4, T_P[0] - 0.02));
+  const cx = W / 2;
+  ctx.save();
+  // giant italic 7 drawn as outline then filled
+  ctx.save(); ctx.translate(cx + 330, 650);
+  const s7 = lerp(1.25, 1, eOutCubic(clamp(t / 1.2))) * (1 + out * 0.6);
+  ctx.scale(s7, s7); ctx.rotate(lerp(0.12, 0, eOutCubic(clamp(t / 1.2))));
+  font('900px FrI'); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.globalAlpha = (1 - out) * 0.9;
+  ctx.setLineDash([3000]); ctx.lineDashOffset = 3000 * (1 - eInOutCubic(clamp(t / 1.1)));
+  ctx.lineWidth = 3; ctx.strokeStyle = C.caramel; ctx.strokeText('7', 0, 300);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = (1 - out) * 0.22 * eOutCubic(clamp((t - 0.6) / 0.8));
+  txt('7', 0, 300, C.caramel, 'center');
+  ctx.restore();
+
+  const lines = [
+    { s: 'Copy these 7 prompts', f: '128px FrB', y: 440 },
+    { s: 'before your next', f: '128px FrB', y: 585 },
+    { s: 'job interview', f: '150px FrI', y: 755 },
+  ];
+  let ci = 0;
+  lines.forEach((L, li) => {
+    font(L.f);
+    let x = cx - ctx.measureText(L.s).width / 2;
+    for (const ch of L.s) {
+      const w = ctx.measureText(ch).width;
+      const start = 0.05 + ci * 0.028;
+      const p = clamp((t - start) / 0.55);
+      const e = eOutElastic(p);
+      const r = mulberry(ci * 7 + 3);
+      const sx = (r() - .5) * 600 * out, sy = -(200 + r() * 500) * eInCubic(out);
+      if (p > 0) {
+        ctx.save();
+        ctx.translate(x + w / 2 + sx, L.y + (1 - e) * 120 + sy);
+        ctx.rotate((1 - e) * (r() - .5) * 0.9 + out * (r() - .5) * 2);
+        ctx.globalAlpha = clamp(p * 4) * (1 - out);
+        const col = li === 2 ? C.gold : ch === '7' ? C.caramel : C.cream;
+        txt(ch, 0, 0, col, 'center');
+        ctx.restore();
+      }
+      x += w; ci++;
+    }
+  });
+  // underline flourish under "job interview"
+  font('150px FrI');
+  const wj = ctx.measureText('job interview').width;
+  const up = eInOutCubic(clamp((t - 1.1) / 0.6));
+  ctx.globalAlpha = 1 - out;
+  ctx.strokeStyle = C.caramel; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let k = 0; k <= 60 * up; k++) {
+    const x = cx - wj / 2 + (k / 60) * wj, y = 800 + Math.sin(k / 60 * Math.PI * 2) * 7;
+    k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+  sparkle(cx + wj / 2 + 60, 640, 36 * eOutBack(clamp((t - 1.3) / 0.4), 3), C.gold, t * 1.2);
+  ctx.restore();
+}
+
+// ------------------------------------------------------------- carousel
+function ringAngle(t) {
+  // rotation (in card steps) as a function of time; eased hop at the start of each prompt
+  let step = 0;
+  for (let i = 1; i < 7; i++) step += eInOutExpo(prog(t, T_P[i] - 0.22, T_P[i] + 0.3));
+  // outro spin
+  step += 3 * eInExpo(prog(t, T_OUT, T_OUT + 1.0));
+  return step;
+}
+
+function drawCard(k, cx, cy, sc, face, depth, focus, t) {
+  const P = PROMPTS[k];
+  ctx.save();
+  ctx.translate(cx, cy);
+  // fake perspective: squash width + slight skew by angle
+  ctx.transform(sc * (0.55 + 0.45 * Math.abs(Math.cos(face))), sc * Math.sin(face) * 0.12, 0, sc, 0, 0);
+  ctx.globalAlpha = clamp(lerp(0.25, 1, depth));
+  ctx.fillStyle = focus > 0.5 ? '#1A120D' : '#110B08';
+  rrect(-CW / 2, -CH / 2, CW, CH, 28); ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = focus > 0 ? rgba(C.caramel, 0.4 + 0.6 * focus) : rgba(C.mocha, .8);
+  ctx.stroke();
+  // corner sparkle + index ticks
+  sparkle(CW / 2 - 52, -CH / 2 + 52, 16, focus > .5 ? C.gold : C.mocha, 0);
+  // big numeral
+  font('200px FrB');
+  txt(P.n, -CW / 2 + 70, -CH / 2 + 230, C.caramel);
+  // title
+  let size = 66; font(`${size}px FrB`);
+  while (ctx.measureText(P.title).width > CW - 520 && size > 44) { size -= 2; font(`${size}px FrB`); }
+  if (focus < 0.5) {
+    txt(P.title, -CW / 2 + 430, -CH / 2 + 190, C.cream);
+  }
+  ctx.restore();
+}
+
+function frontContent(i, t, pulse) {
+  const u = t - T_P[i], P = PROMPTS[i];
+  const arrive = i === 0 ? clamp((u - 0.35) / 0.4) : clamp((u - 0.12) / 0.3);
+  const leave = prog(u, PD - 0.22, PD - 0.05);
+  const a = eOutCubic(arrive) * (1 - leave);
+  if (a <= 0) return;
+  ctx.save();
+  ctx.translate(W / 2, H / 2 + 40);
+  ctx.globalAlpha = a;
+  let size = 66; font(`${size}px FrB`);
+  while (ctx.measureText(P.title).width > CW - 520 && size > 44) { size -= 2; font(`${size}px FrB`); }
+  // title: mask rise word by word
+  let x = -CW / 2 + 430;
+  P.title.split(' ').forEach((wd, wi) => {
+    const p = eOutExpo(clamp((u - 0.12 - wi * 0.04) / 0.35));
+    maskRise(wd, x, -CH / 2 + 190, p * (i === 0 ? clamp((u - 0.3) * 5) : 1), C.cream, size);
+    x += ctx.measureText(wd + ' ').width;
+  });
+  // caramel rule
+  const rp = eInOutExpo(clamp((u - 0.18) / 0.4));
+  ctx.fillStyle = C.caramel; ctx.fillRect(-CW / 2 + 430, -CH / 2 + 228, (CW - 500) * rp, 4);
+  // body
+  ctx.globalAlpha = 1;
+  drawRich(BODY[i], -CW / 2 + 70, -CH / 2 + 325, 62, clamp((u - 0.15) / 0.45), { size: 42, color: C.light, hlColor: C.gold, spread: 5, alpha: a });
+  ctx.restore();
+}
+
+function carousel(t, pulse) {
+  const enter = eOutExpo(prog(t, T_P[0] - 0.05, T_P[0] + 0.7));
+  const collapse = eInExpo(prog(t, T_OUT + 0.35, T_OUT + 1.0));
+  const step = ringAngle(t);
+  const R = 900 * enter * (1 - collapse);
+  const cards = [];
+  for (let k = 0; k < 7; k++) {
+    const a = (k - step) / 7 * Math.PI * 2 + (1 - enter) * 2.5;
+    const z = Math.cos(a);
+    const x = W / 2 + Math.sin(a) * R;
+    const y = H / 2 + 40 - z * 0 + (1 - z) * -60 * enter;
+    const depth = (z + 1) / 2;
+    const sc = lerp(0.36, 1, Math.pow(depth, 1.6)) * lerp(0.2, 1, enter) * (1 - collapse * 0.9) * (1 + (depth > 0.98 ? pulse * 0.008 : 0));
+    cards.push({ k, x, y, z, depth, sc, a });
+  }
+  cards.sort((p, q) => p.z - q.z);
+  const cur = t < T_OUT ? Math.min(6, Math.floor((t - T_P[0]) / PD)) : -1;
+  for (const c of cards) {
+    const focus = c.k === cur ? clamp((c.depth - 0.9) / 0.1) : 0;
+    ctx.globalAlpha = 1 - collapse;
+    drawCard(c.k, c.x, c.y, c.sc, c.a, c.depth, focus, t);
+  }
+  ctx.globalAlpha = 1;
+  if (cur >= 0 && t >= T_P[0]) frontContent(cur, t, pulse);
+}
+
+// ------------------------------------------------------------- outro (no text)
+function outroScene(t, pulse) {
+  const u = t - T_OUT;
+  const cx = W / 2, cy = H / 2 + 40;
+  const g = eOutElastic(prog(u, 0.9, 1.5)), sh = eInExpo(prog(u, 1.65, 2.05));
+  const r = 210 * g * (1 - sh);
+  if (u > 0.85 && u < 1.0) { ctx.fillStyle = rgba(C.gold, (1 - (u - .85) / .15) * .3); ctx.fillRect(0, 0, W, H); }
+  // light rays
+  if (r > 0) {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(u * 0.5);
+    for (let k = 0; k < 12; k++) {
+      ctx.rotate(Math.PI / 6);
+      const gr = ctx.createLinearGradient(0, 0, 0, -r * 3.2);
+      gr.addColorStop(0, rgba(C.caramel, .35)); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.moveTo(-r * 0.08, 0); ctx.lineTo(0, -r * 3.2); ctx.lineTo(r * 0.08, 0); ctx.fill();
+    }
+    ctx.restore();
+  }
+  sparkle(cx, cy, r * 1.12, rgba(C.caramel, .55), -u * 0.6);
+  sparkle(cx, cy, r, C.gold, u * 0.6);
+  sparkle(cx, cy, r * 0.38, C.cream, u * 0.6);
+}
+
+function render(t, f) {
+  if (!BODY) BODY = PROMPTS.map(p => layoutRich(p.body, '42px IDMed', CW - 140));
+  clear();
+  const pulse = pulseAt(t, KICKS, 8), sn = pulseAt(t, SNARES, 10);
+  const expand = eInExpo(prog(t, T_OUT + 0.8, T_OUT + 2.0)) * 2;
+  // slow camera drift
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  const z = 1 + 0.03 * Math.sin(t * 0.5) + pulse * 0.006; ctx.scale(z, z);
+  ctx.rotate(Math.sin(t * 0.35) * 0.008);
+  ctx.translate(-W / 2, -H / 2);
+  dust(t, 1 - prog(t, 14.3, 14.9));
+  orbits(t, pulse, expand, 1 - prog(t, 13.9, 14.7));
+  if (t < T_P[0]) titleScene(t, pulse);
+  if (t >= T_P[0] - 0.05 && t < T_OUT + 1.05) carousel(t, pulse);
+  if (t >= T_OUT) outroScene(t, pulse);
+  ctx.restore();
+  // snare flash edge
+  if (sn > 0.02 && t < T_OUT) { ctx.fillStyle = rgba(C.caramel, sn * 0.05); ctx.fillRect(0, 0, W, H); }
+  vignette(0.7);
+  grain(f, 0.05);
+  const fe = prog(t, 14.55, 14.95);
+  if (fe > 0) { ctx.fillStyle = `rgba(0,0,0,${fe})`; ctx.fillRect(0, 0, W, H); }
+  watermark();
+}
+</script>
+</body>
+</html>

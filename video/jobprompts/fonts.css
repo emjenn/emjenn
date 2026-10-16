@@ -1,0 +1,12 @@
+@font-face { font-family: IDBlack; src: url(../fonts/InterDisplay-Black.otf); }
+@font-face { font-family: IDBold;  src: url(../fonts/InterDisplay-Bold.otf); }
+@font-face { font-family: IDSemi;  src: url(../fonts/InterDisplay-SemiBold.otf); }
+@font-face { font-family: IDMed;   src: url(../fonts/InterDisplay-Medium.otf); }
+@font-face { font-family: Sora;    src: url(../fonts/Sora-600.ttf); }
+@font-face { font-family: SoraB;   src: url(../fonts/Sora-800.ttf); }
+@font-face { font-family: SoraR;   src: url(../fonts/Sora-400.ttf); }
+@font-face { font-family: FrB;     src: url(../fonts/Fraunces-900.ttf); }
+@font-face { font-family: FrI;     src: url(../fonts/Fraunces-Italic-600.ttf); }
+@font-face { font-family: JBM;     src: url(../fonts/JetBrainsMono-400.ttf); }
+html, body { margin: 0; background: #000; overflow: hidden; }
+canvas { display: block; }
